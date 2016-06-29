@@ -623,7 +623,7 @@ void *sqlite3DbMallocZero(sqlite3 *db, u64 n){
 }
 
 /*
-** Allocate and zero memory.  If the allocation fails, make
+** Allocate memory.  If the allocation fails, make
 ** the mallocFailed flag in the connection pointer.
 **
 ** If db!=0 and db->mallocFailed is true (indicating a prior malloc

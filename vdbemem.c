@@ -18,6 +18,15 @@
 #include "sqliteInt.h"
 #include "vdbeInt.h"
 
+/* COMDB2 MODIFICATION */
+#include <arpa/inet.h>
+#include <inttypes.h>
+#include <flibc.h>
+#include <strings.h>
+#include <types.h>
+#include <util.h>
+#include "debug_switches.h"
+
 #ifdef SQLITE_DEBUG
 /*
 ** Check invariants on a Mem object.
@@ -29,13 +38,14 @@ int sqlite3VdbeCheckMemInvariants(Mem *p){
   /* If MEM_Dyn is set then Mem.xDel!=0.  
   ** Mem.xDel is might not be initialized if MEM_Dyn is clear.
   */
-  assert( (p->flags & MEM_Dyn)==0 || p->xDel!=0 );
+  /* COMDB2 MODIFICATION: these asserts dont work for comdb2 */
+  //assert( (p->flags & MEM_Dyn)==0 || p->xDel!=0 );
 
   /* MEM_Dyn may only be set if Mem.szMalloc==0.  In this way we
   ** ensure that if Mem.szMalloc>0 then it is safe to do
   ** Mem.z = Mem.zMalloc without having to check Mem.flags&MEM_Dyn.
   ** That saves a few cycles in inner loops. */
-  assert( (p->flags & MEM_Dyn)==0 || p->szMalloc==0 );
+  //assert( (p->flags & MEM_Dyn)==0 || p->szMalloc==0 );
 
   /* Cannot be both MEM_Int and MEM_Real at the same time */
   assert( (p->flags & (MEM_Int|MEM_Real))!=(MEM_Int|MEM_Real) );
@@ -57,7 +67,7 @@ int sqlite3VdbeCheckMemInvariants(Mem *p){
       ((p->szMalloc>0 && p->z==p->zMalloc)? 1 : 0) +
       ((p->flags&MEM_Dyn)!=0 ? 1 : 0) +
       ((p->flags&MEM_Ephem)!=0 ? 1 : 0) +
-      ((p->flags&MEM_Static)!=0 ? 1 : 0) == 1
+      ((p->flags&MEM_Static)!=0 ? 1 : 0) >= 1
     );
   }
   return 1;
@@ -145,8 +155,15 @@ SQLITE_NOINLINE int sqlite3VdbeMemGrow(Mem *pMem, int n, int bPreserve){
 
   if( bPreserve && pMem->z && pMem->z!=pMem->zMalloc ){
     memcpy(pMem->zMalloc, pMem->z, pMem->n);
+
+    /* COMDB2 MODIFICATION */
+    if( pMem->flags&MEM_Xor ){
+      xorbufcpy(pMem->zMalloc, pMem->zMalloc, pMem->n);
+      pMem->flags &= ~MEM_Xor;
+    }
+
   }
-  if( (pMem->flags&MEM_Dyn)!=0 ){
+  if( (pMem->flags&MEM_Dyn)!=0 && pMem->xDel){ /* COMDB2 MODIFICATION */
     assert( pMem->xDel!=0 && pMem->xDel!=SQLITE_DYNAMIC );
     pMem->xDel((void *)(pMem->z));
   }
@@ -163,8 +180,8 @@ SQLITE_NOINLINE int sqlite3VdbeMemGrow(Mem *pMem, int n, int bPreserve){
 **
 ** Any prior string or blob content in the pMem object may be discarded.
 ** The pMem->xDel destructor is called, if it exists.  Though MEM_Str
-** and MEM_Blob values may be discarded, MEM_Int, MEM_Real, and MEM_Null
-** values are preserved.
+** and MEM_Blob values may be discarded, MEM_Int, MEM_Real, MEM_Datetime,
+** MEM_Interval and MEM_Null values are preserved.
 **
 ** Return SQLITE_OK on success or an error code (probably SQLITE_NOMEM)
 ** if unable to complete the resizing.
@@ -177,7 +194,7 @@ int sqlite3VdbeMemClearAndResize(Mem *pMem, int szNew){
   }
   assert( (pMem->flags & MEM_Dyn)==0 );
   pMem->z = pMem->zMalloc;
-  pMem->flags &= (MEM_Null|MEM_Int|MEM_Real);
+  pMem->flags &= (MEM_Null|MEM_Int|MEM_Real|MEM_Datetime|MEM_Interval);
   return SQLITE_OK;
 }
 
@@ -280,13 +297,15 @@ int sqlite3VdbeMemNulTerminate(Mem *pMem){
 ** user and the latter is an internal programming error.
 */
 int sqlite3VdbeMemStringify(Mem *pMem, u8 enc, u8 bForce){
+  int rc = SQLITE_OK;
   int fg = pMem->flags;
   const int nByte = 32;
 
   assert( pMem->db==0 || sqlite3_mutex_held(pMem->db->mutex) );
   assert( !(fg&MEM_Zero) );
   assert( !(fg&(MEM_Str|MEM_Blob)) );
-  assert( fg&(MEM_Int|MEM_Real) );
+  /* COMDB2 MODIFICATION */
+  assert( fg&(MEM_Int|MEM_Real|MEM_Datetime|MEM_Interval) );
   assert( (pMem->flags&MEM_RowSet)==0 );
   assert( EIGHT_BYTE_ALIGNMENT(pMem) );
 
@@ -301,18 +320,137 @@ int sqlite3VdbeMemStringify(Mem *pMem, u8 enc, u8 bForce){
   ** 
   ** FIX ME: It would be better if sqlite3_snprintf() could do UTF-16.
   */
-  if( fg & MEM_Int ){
-    sqlite3_snprintf(nByte, pMem->z, "%lld", pMem->u.i);
-  }else{
-    assert( fg & MEM_Real );
-    sqlite3_snprintf(nByte, pMem->z, "%!.15g", pMem->u.r);
+  /* COMDB2 MODIFICATION */
+#ifdef SQLITE_BUILDING_FOR_COMDB2
+  if( fg & MEM_Interval ){
+    char tmp[64];
+    char *z;
+
+    if (pMem->du.tv.type == INTV_YM_TYPE)
+    {
+       snprintf(tmp, sizeof(tmp), "%s%u-%2.2u",
+             (pMem->du.tv.sign==-1)?"- ":"",
+             pMem->du.tv.u.ym.years, pMem->du.tv.u.ym.months);
+       tmp[sizeof(tmp)-1] = 0;
+    }
+    else if (pMem->du.tv.type == INTV_DS_TYPE)
+    {
+       snprintf(tmp, sizeof(tmp), "%s%u %2.2u:%2.2u:%2.2u.%3.3u",
+             (pMem->du.tv.sign==-1)?"- ":"",
+             pMem->du.tv.u.ds.days,
+             pMem->du.tv.u.ds.hours, pMem->du.tv.u.ds.mins,
+             pMem->du.tv.u.ds.sec, pMem->du.tv.u.ds.frac);
+       tmp[sizeof(tmp)-1] = 0;
+    }
+    else if (pMem->du.tv.type == INTV_DSUS_TYPE)
+    {
+       snprintf(tmp, sizeof(tmp), "%s%u %2.2u:%2.2u:%2.2u.%6.6u",
+             (pMem->du.tv.sign==-1)?"- ":"",
+             pMem->du.tv.u.ds.days,
+             pMem->du.tv.u.ds.hours, pMem->du.tv.u.ds.mins,
+             pMem->du.tv.u.ds.sec, pMem->du.tv.u.ds.frac);
+       tmp[sizeof(tmp)-1] = 0;
+    }
+    else if (pMem->du.tv.type == INTV_DECIMAL_TYPE)
+    {
+       /* max string is like 43 letters */
+       if(sqlite3DecimalToString( &pMem->du.tv.u.dec, tmp, sizeof(tmp)))
+       {
+          fprintf( stderr, "%s:%d failed to convert decimal to string\n", 
+                __FILE__, __LINE__);
+          return SQLITE_INTERNAL;
+       }
+    }
+    else
+    {
+       fprintf(stderr, "BUG %s:%d type=%d\n", __FILE__, __LINE__, pMem->du.tv.type);
+       return SQLITE_INTERNAL;
+    }
+
+    if (pMem->zMalloc) {
+        sqlite3DbFree(pMem->db, pMem->zMalloc);
+        pMem->zMalloc = NULL;
+        pMem->szMalloc = 0;
+        pMem->z = NULL;
+    }
+
+    pMem->n = strlen(tmp);
+    z = sqlite3GlobalConfig.m.xMalloc(pMem->n+2);
+    if( !z ) return SQLITE_NOMEM;
+    memcpy(z, tmp, pMem->n);
+    z[pMem->n] = 0;
+    z[pMem->n+1] = 0;
+    pMem->z = z;
+    pMem->zMalloc = z;
+    pMem->szMalloc = pMem->n + 2;
+    pMem->enc = SQLITE_UTF8;
+    pMem->flags |= MEM_Str | MEM_Term | MEM_Dyn;
+    if( bForce ) pMem->flags &= ~MEM_Interval;
+    sqlite3VdbeChangeEncoding(pMem, enc);
+
+  } else if(fg & MEM_Datetime) {
+
+    char    tmp[64];
+    int     outdtsz;
+
+    if (pMem->zMalloc) {
+        sqlite3DbFree(pMem->db, pMem->zMalloc);
+        pMem->zMalloc = NULL;
+        pMem->szMalloc = 0;
+        pMem->z = NULL;
+    }
+
+    if( convMem2ClientDatetimeStr(pMem, tmp, sizeof(tmp), &outdtsz)) { 
+        char *z;
+        sqlite3ErrorWithMsg(pMem->db, SQLITE_CONV_ERROR, "can't convert datetime value to string");
+        rc = SQLITE_CONV_ERROR;
+        pMem->n = strlen("conv_error");
+        z = sqlite3GlobalConfig.m.xMalloc(pMem->n+2);
+        if( !z ) return SQLITE_NOMEM;
+        memcpy(z, "conv_error", pMem->n);
+        z[pMem->n] = 0;
+        z[pMem->n+1] = 0;
+        pMem->z = z;
+        pMem->enc = SQLITE_UTF8;
+        pMem->flags |= MEM_Str | MEM_Term | MEM_Dyn;
+        if( bForce ) pMem->flags &= ~MEM_Datetime;
+        sqlite3VdbeChangeEncoding(pMem, enc);
+    } else {
+        char *z;
+        pMem->n = strlen(tmp);
+        z = sqlite3GlobalConfig.m.xMalloc(pMem->n+2);
+        if( !z ) return SQLITE_NOMEM;
+        memcpy(z, tmp, pMem->n);
+        z[pMem->n] = 0;
+        z[pMem->n+1] = 0;
+        pMem->z = z;
+        pMem->zMalloc = z;
+        pMem->szMalloc = pMem->n + 2;
+        pMem->enc = SQLITE_UTF8;
+        pMem->flags |= MEM_Str | MEM_Term | MEM_Dyn;
+        if( bForce ) pMem->flags &= ~MEM_Datetime;
+        sqlite3VdbeChangeEncoding(pMem, enc);
+    }
   }
-  pMem->n = sqlite3Strlen30(pMem->z);
-  pMem->enc = SQLITE_UTF8;
-  pMem->flags |= MEM_Str|MEM_Term;
-  if( bForce ) pMem->flags &= ~(MEM_Int|MEM_Real);
-  sqlite3VdbeChangeEncoding(pMem, enc);
-  return SQLITE_OK;
+#else
+  if (0);
+#endif /* SQLITE_BUILDING_FOR_COMDB2 */
+  else {
+    if( fg & MEM_Int ){
+      sqlite3_snprintf(nByte, pMem->z, "%lld", pMem->u.i);
+    }else{
+      assert( fg & MEM_Real );
+      sqlite3_snprintf(nByte, pMem->z, "%!.15g", pMem->u.r);
+    }
+    pMem->n = sqlite3Strlen30(pMem->z);
+    pMem->enc = SQLITE_UTF8;
+    pMem->flags |= MEM_Str|MEM_Term;
+    if( bForce ) pMem->flags &= ~(MEM_Int|MEM_Real);
+    sqlite3VdbeChangeEncoding(pMem, enc);
+    rc = SQLITE_OK;
+  }
+  /* COMDB2 MODIFICATION */
+  return rc;
 }
 
 /*
@@ -363,7 +501,7 @@ static SQLITE_NOINLINE void vdbeMemClearExternAndSetNull(Mem *p){
     assert( (p->flags & MEM_Agg)==0 );
     testcase( p->flags & MEM_Dyn );
   }
-  if( p->flags&MEM_Dyn ){
+  if( p->flags&MEM_Dyn && p->xDel ){ /* COMDB2 MODIFICATION */
     assert( (p->flags&MEM_RowSet)==0 );
     assert( p->xDel!=SQLITE_DYNAMIC && p->xDel!=0 );
     p->xDel((void *)p->z);
@@ -463,6 +601,32 @@ i64 sqlite3VdbeIntValue(Mem *pMem){
     return pMem->u.i;
   }else if( flags & MEM_Real ){
     return doubleToInt64(pMem->u.r);
+  }
+  /* COMDB2 MODIFICATION */
+  else if( pMem->flags & MEM_Interval)
+  {
+    if(pMem->du.tv.type == INTV_YM_TYPE) 
+    {
+      return pMem->du.tv.sign*(i64)(pMem->du.tv.u.ym.years*12+
+          pMem->du.tv.u.ym.months);
+    }
+    else if(pMem->du.tv.type == INTV_DS_TYPE || pMem->du.tv.type == INTV_DSUS_TYPE)
+    {
+      return pMem->du.tv.sign*(i64)(
+          pMem->du.tv.u.ds.days*24*3600+
+          pMem->du.tv.u.ds.hours*3600+
+          pMem->du.tv.u.ds.mins*60+
+          pMem->du.tv.u.ds.sec);
+    }
+    else 
+    {
+       fprintf(stderr, "%s:%d: Cannot convert a decimal to integer\n", __FILE__, __LINE__);
+       return 0;
+    }
+  }
+  else if( pMem->flags & MEM_Datetime)
+  {
+    return pMem->du.dt.dttz_sec;
   }else if( flags & (MEM_Str|MEM_Blob) ){
     i64 value = 0;
     assert( pMem->z || pMem->n==0 );
@@ -486,6 +650,24 @@ double sqlite3VdbeRealValue(Mem *pMem){
     return pMem->u.r;
   }else if( pMem->flags & MEM_Int ){
     return (double)pMem->u.i;
+
+   /* COMDB2 MODIFICATION */
+  }
+  else if( pMem->flags & MEM_Interval)
+  {
+    char tmp[128];
+    switch (pMem->du.tv.type) {
+    case INTV_YM_TYPE:
+    case INTV_DS_TYPE:
+    case INTV_DSUS_TYPE:
+      return interval_to_double(&pMem->du.tv);
+    default:
+       decQuadToString(&pMem->du.tv.u.dec, tmp);
+       return atof(tmp);
+    }
+  }else if(pMem->flags & MEM_Datetime) {
+    return pMem->du.dt.dttz_sec + 
+      pMem->du.dt.dttz_frac / (pMem->du.dt.dttz_prec == DTTZ_PREC_MSEC ? 1E3 : 1E6);
   }else if( pMem->flags & (MEM_Str|MEM_Blob) ){
     /* (double)0 In case of SQLITE_OMIT_FLOATING_POINT... */
     double val = (double)0;
@@ -562,9 +744,11 @@ int sqlite3VdbeMemRealify(Mem *pMem){
 */
 int sqlite3VdbeMemNumerify(Mem *pMem){
   if( (pMem->flags & (MEM_Int|MEM_Real|MEM_Null))==0 ){
-    assert( (pMem->flags & (MEM_Blob|MEM_Str))!=0 );
+    assert( (pMem->flags & (MEM_Blob|MEM_Str|MEM_Interval|MEM_Datetime))!=0 );
     assert( pMem->db==0 || sqlite3_mutex_held(pMem->db->mutex) );
-    if( 0==sqlite3Atoi64(pMem->z, &pMem->u.i, pMem->n, pMem->enc) ){
+  /* TODO: COMDB2 MODIFICATION */
+  /* string is NULL for cast(intervalds at string) */
+    if( pMem->z && 0==sqlite3Atoi64(pMem->z, &pMem->u.i, pMem->n, pMem->enc) ){
       MemSetTypeFlag(pMem, MEM_Int);
     }else{
       pMem->u.r = sqlite3VdbeRealValue(pMem);
@@ -577,6 +761,9 @@ int sqlite3VdbeMemNumerify(Mem *pMem){
   return SQLITE_OK;
 }
 
+void sqlite3SetConversionError(void);
+
+
 /*
 ** Cast the datatype of the value in pMem according to the affinity
 ** "aff".  Casting is different from applying affinity in that a cast
@@ -584,8 +771,11 @@ int sqlite3VdbeMemNumerify(Mem *pMem){
 ** affinity even if that results in loss of data.  This routine is
 ** used (for example) to implement the SQL "cast()" operator.
 */
-void sqlite3VdbeMemCast(Mem *pMem, u8 aff, u8 encoding){
-  if( pMem->flags & MEM_Null ) return;
+int sqlite3VdbeMemCast(Vdbe *p, Mem *pMem, u8 aff, u8 encoding){
+  int rc = SQLITE_OK, rc2;
+  sqlite3 *db = p->db;
+
+  if( pMem->flags & MEM_Null ) return rc;
   switch( aff ){
     case SQLITE_AFF_NONE: {   /* Really a cast to BLOB */
       if( (pMem->flags & MEM_Blob)==0 ){
@@ -605,8 +795,42 @@ void sqlite3VdbeMemCast(Mem *pMem, u8 aff, u8 encoding){
       sqlite3VdbeMemIntegerify(pMem);
       break;
     }
-    case SQLITE_AFF_REAL: {
+    case SQLITE_AFF_REAL:
+    /* COMDB2 MODIFICATION */
+    case SQLITE_AFF_SMALL: {
       sqlite3VdbeMemRealify(pMem);
+      break;
+    }
+    case SQLITE_AFF_DATETIME: {
+      rc2 = sqlite3VdbeMemDatetimefyTz(pMem, pMem->tz);
+      if (rc2 && !debug_switch_ignore_datetime_cast_failures()) {
+        sqlite3SetString(&p->zErrMsg, db, "cast to datetime failed");
+        sqlite3SetConversionError();
+        rc = rc2;
+      }
+      break;
+    }
+    case SQLITE_AFF_INTV_YE:
+    case SQLITE_AFF_INTV_MO:
+    case SQLITE_AFF_INTV_DY:
+    case SQLITE_AFF_INTV_HO:
+    case SQLITE_AFF_INTV_MI:
+    case SQLITE_AFF_INTV_SE: {
+      rc2 = sqlite3VdbeMemIntervalfy(pMem, aff);
+      if (rc2 && !debug_switch_ignore_datetime_cast_failures()) {
+        sqlite3SetString(&p->zErrMsg, db, "cast to interval failed");
+        sqlite3SetConversionError();
+        rc = rc2;
+      }
+      break;
+    }
+    case SQLITE_AFF_DECIMAL: {
+      rc2 = sqlite3VdbeMemDecimalfy(pMem);
+      if (rc2 && !debug_switch_ignore_datetime_cast_failures()) {
+        sqlite3SetString(&p->zErrMsg, db, "cast to decimal failed");
+        sqlite3SetConversionError();
+        rc = rc2;
+      }
       break;
     }
     default: {
@@ -615,10 +839,13 @@ void sqlite3VdbeMemCast(Mem *pMem, u8 aff, u8 encoding){
       pMem->flags |= (pMem->flags&MEM_Blob)>>3;
       sqlite3ValueApplyAffinity(pMem, SQLITE_AFF_TEXT, encoding);
       assert( pMem->flags & MEM_Str || pMem->db->mallocFailed );
-      pMem->flags &= ~(MEM_Int|MEM_Real|MEM_Blob|MEM_Zero);
+      //pMem->flags &= ~(MEM_Int|MEM_Real|MEM_Blob|MEM_Zero);
+      if ( (pMem->flags & MEM_Str) & !pMem->db->mallocFailed )
+        pMem->flags = MEM_Str | (~(MEM_AffMask|MEM_Zero));
       break;
     }
   }
+  return rc;
 }
 
 /*
@@ -929,6 +1156,47 @@ int sqlite3VdbeMemSetStr(
 
   return SQLITE_OK;
 }
+ 
+/* COMDB2 MODIFICATION */
+/*
+** Change the value of a Mem to be a datetime.
+*/
+int sqlite3VdbeMemSetDatetime(
+  Mem *pMem,          /* Memory cell to set to datetime value */
+  dttz_t * dt,        /* datetime fields */
+  const char * tz     /* tzname propagation, for conversion purposes */ 
+){
+  sqlite3VdbeMemSetNull(pMem);
+  pMem->du.dt = *dt;
+  pMem->tz = tz;
+  pMem->flags = MEM_Datetime;
+  return SQLITE_OK;
+}
+
+/*
+** Change the value of a Mem to be an interval.
+*/
+int sqlite3VdbeMemSetInterval(
+  Mem *pMem,          /* Memory cell to set to interval value */
+  intv_t * tv         /* interval fields */
+){
+  sqlite3VdbeMemSetNull(pMem);
+  pMem->du.tv = *tv;
+  pMem->flags = MEM_Interval;
+  return SQLITE_OK;
+}
+
+/*
+** Delete any previous value and set the value stored in *pMem to val,
+** manifest type Decimal.
+*/
+int sqlite3VdbeMemSetDecimal(Mem *pMem, decQuad *val){
+  sqlite3VdbeMemSetNull(pMem);
+  pMem->du.tv.u.dec = *val;
+  pMem->du.tv.type = SQLITE_DECIMAL;
+  pMem->flags = MEM_Interval;
+  return SQLITE_OK;
+}
 
 /*
 ** Move data out of a btree key or data field and into a Mem structure.
@@ -1023,7 +1291,9 @@ static SQLITE_NOINLINE const void *valueToText(sqlite3_value* pVal, u8 enc){
     }
     sqlite3VdbeMemNulTerminate(pVal); /* IMP: R-31275-44060 */
   }else{
-    sqlite3VdbeMemStringify(pVal, enc, 0);
+    /* COMDB2 MODIFICATION */
+    if (sqlite3VdbeMemStringify(pVal, enc, 0) != SQLITE_OK)
+      return 0;
     assert( 0==(1&SQLITE_PTR_TO_INT(pVal->z)) );
   }
   assert(pVal->enc==(enc & ~SQLITE_UTF16_ALIGNED) || pVal->db==0
@@ -1265,6 +1535,10 @@ static int valueFromExpr(
   int negInt = 1;
   const char *zNeg = "";
   int rc = SQLITE_OK;
+  Vdbe *p;
+
+  /* COMDB2 MODIFICATION: first in list, we dont support more than one vdbe on a db */
+  p = db->pVdbe;
 
   if( !pExpr ){
     *ppVal = 0;
@@ -1284,7 +1558,9 @@ static int valueFromExpr(
     rc = valueFromExpr(db, pExpr->pLeft, enc, aff, ppVal, pCtx);
     testcase( rc!=SQLITE_OK );
     if( *ppVal ){
-      sqlite3VdbeMemCast(*ppVal, aff, SQLITE_UTF8);
+      if (aff == SQLITE_AFF_DATETIME)
+        (*ppVal)->tz = p->tzname;
+      sqlite3VdbeMemCast(p, *ppVal, aff, SQLITE_UTF8);
       sqlite3ValueApplyAffinity(*ppVal, affinity, SQLITE_UTF8);
     }
     return rc;
@@ -1587,6 +1863,8 @@ int sqlite3Stat4ValueFromExpr(
   return stat4ValueFromExpr(pParse, pExpr, affinity, 0, ppVal);
 }
 
+#include <serialget.c>
+
 /*
 ** Extract the iCol-th column from the nRec-byte record in pRec.  Write
 ** the column value into *ppVal.  If *ppVal is initially NULL then a new
@@ -1631,6 +1909,9 @@ int sqlite3Stat4Column(
     if( pMem==0 ) return SQLITE_NOMEM;
   }
   sqlite3VdbeSerialGet(&a[iField-szField], t, pMem);
+  /* COMDB2 MODIFICATION */
+  if(11 == t) /* see sqlite3VdbeSerialGet, 11 is datetime blob */
+    pMem->tz = db->pVdbe->tzname;
   pMem->enc = ENC(db);
   return SQLITE_OK;
 }
@@ -1692,3 +1973,974 @@ int sqlite3ValueBytes(sqlite3_value *pVal, u8 enc){
   }
   return 0;
 }
+
+#ifdef SQLITE_BUILDING_FOR_COMDB2
+
+/* COMDB2 MODIFICATION */
+
+/*
+** Add MEM_Datetime to the set of representations for the given Mem. 
+*/
+int sqlite3VdbeMemDatetimefyTz(Mem *pMem, const char *tz){
+  int fg = pMem->flags;
+  if(fg & MEM_Null)
+    return SQLITE_OK;
+  if(fg & MEM_Interval)
+    return SQLITE_ERROR;
+  if(pMem->flags & MEM_Blob)
+    return SQLITE_ERROR; 
+  if(pMem->flags & MEM_Real) {
+    real_to_dttz(pMem->u.r, &pMem->du.dt);
+    pMem->flags = MEM_Datetime;
+  } else if(pMem->flags & MEM_Int){
+    if (int_to_dttz(pMem->u.i, &pMem->du.dt) != 0)
+      return SQLITE_ERROR;
+    pMem->flags = MEM_Datetime;
+  } else if(pMem->flags & MEM_Str) {
+    if (str_to_dttz(pMem->z, pMem->n, pMem->tz ? pMem->tz : tz,
+     &pMem->du.dt) != 0) {
+      return SQLITE_ERROR;
+    }
+    pMem->flags = MEM_Datetime;
+    /* all is good, get rid of the string, which is user-provided and partial
+       many times */
+    if(pMem->flags & MEM_Dyn) {
+        sqlite3DbFree(pMem->db, pMem->z);
+    }
+    pMem->n = 0;
+    pMem->z = 0;
+    /*no MEM_Blob here*/
+    pMem->flags &= ~(MEM_Str|MEM_Static|MEM_Dyn|MEM_Ephem);
+  }
+  return SQLITE_OK;
+}
+
+/*
+** Add MEM_Datetime to the set of representations for the given Mem. 
+*/
+int sqlite3VdbeMemDatetimefy(Mem *pMem){
+   return sqlite3VdbeMemDatetimefyTz(pMem, NULL);
+}
+
+/*
+** Add MEM_Datetime to the set of representations for the given Mem. 
+*/
+int sqlite3VdbeMemDecimalfy(Mem *pMem)
+{
+   decContext     dfp_ctx;
+   int            rc = SQLITE_OK;
+   int            fg = pMem->flags;
+
+   if(fg & MEM_Null) return rc;
+
+   /* cannot convert a datetime to a decimal */
+   if(fg & MEM_Datetime) return SQLITE_ERROR; 
+
+   /* cannot convert a blob to a decimal */
+   if(fg & MEM_Blob) return SQLITE_ERROR; 
+
+   /* cannot convert a interval to a decimal */
+   if(fg & MEM_Interval) return SQLITE_ERROR;
+
+   /* TODO: we need a custom routine */
+   if(fg & MEM_Real) return SQLITE_ERROR;
+
+   if(fg & MEM_Int)
+   {
+      char str[32]; 
+      void *ret = NULL;
+
+      /* we can do better here, but we'll optimize later if need to */
+      snprintf(str, sizeof(str), "%lld", pMem->u.i);
+
+      dec_ctx_init(&dfp_ctx, DEC_INIT_DECQUAD, gbl_decimal_rounding);
+
+      ret = decQuadFromString( &pMem->du.tv.u.dec, str, &dfp_ctx);
+
+      if (ret)
+      {
+         if (dfp_conv_check_status( &dfp_ctx, "string", "quad"))
+         {
+            rc = SQLITE_ERROR;
+         }
+         else
+         {
+            pMem->du.tv.type = INTV_DECIMAL_TYPE;
+            /* we ignore sign, it's embedded */
+            pMem->du.tv.sign = 0;
+            rc = SQLITE_OK;
+         }
+      }
+      else
+         rc = SQLITE_ERROR;
+      if(0){
+         char dbg[1024];
+
+         decQuadToString( &pMem->du.tv.u.dec, dbg );
+         printf("Parsed to quad %s\n", dbg);
+      }
+   }
+
+   else if(fg & MEM_Str)
+   {
+      void *ret = NULL;
+      
+      dec_ctx_init(&dfp_ctx, DEC_INIT_DECQUAD, gbl_decimal_rounding);
+
+
+      /* COMDB2 MODIFICATION. */
+      sqlite3VdbeMemNulTerminate(pMem);
+
+      ret = decQuadFromString( &pMem->du.tv.u.dec, pMem->z, &dfp_ctx);
+      
+      if (ret)
+      {
+         if (dfp_conv_check_status( &dfp_ctx, "string", "quad"))
+         {
+            rc = SQLITE_ERROR;
+         }
+         else
+         {
+            pMem->du.tv.type = INTV_DECIMAL_TYPE;
+            /* we ignore sign, it's embedded */
+            pMem->du.tv.sign = 0;
+            rc = SQLITE_OK;
+         }
+      }
+      else
+         rc = SQLITE_ERROR;
+      if(0){
+         char dbg[1024];
+
+         decQuadToString( &pMem->du.tv.u.dec, dbg );
+         printf("Parsed to quad %s\n", dbg);
+      }
+   }
+
+   /* don't touch these 
+      if(pMem->flags & MEM_Dyn) {
+      sqlite3DbFree(pMem->db, pMem->z);
+   }
+
+
+   pMem->n = 0;
+   pMem->z = 0;
+   pMem->flags &= ~(MEM_Int|MEM_Str|MEM_Static|MEM_Dyn|MEM_Ephem);
+   */
+
+   if(pMem->flags & MEM_Dyn)
+   {
+      sqlite3DbFree(pMem->db, pMem->z);
+       pMem->z = 0;
+   }
+   pMem->flags = MEM_Interval;
+
+   return rc;
+}
+
+
+static char * skipsp(char *str) {
+    while (str && str[0] == ' ') str++;
+    return str;
+}
+
+#include <alloca.h>
+
+/*
+** Add MEM_Interval to the set of representations for the given Mem. 
+*/
+int sqlite3VdbeMemIntervalfy(Mem *pMem, int type){
+  uint64_t tmp, tmp2;
+  int fg = pMem->flags;
+
+  if ((fg & MEM_Interval) || (fg & MEM_Null)) return SQLITE_OK;
+
+  if (type == SQLITE_AFF_DECIMAL) {
+    fprintf(stderr, "BUG, wrong function called, use Decimalfy %s:%d\n",
+      __FILE__, __LINE__);
+    abort();
+  }
+
+  bzero(&pMem->du, sizeof(pMem->du));
+  if(pMem->flags & MEM_Int) {
+    int_to_interval(pMem->u.i, &tmp, &tmp2, &pMem->du.tv.sign);
+    goto num;
+  } else if (pMem->flags & MEM_Real) {
+    double_to_interval(pMem->u.r, &tmp, &tmp2, &pMem->du.tv.sign);
+    goto num;
+  } else if(pMem->flags & MEM_Str) {
+    int intv;
+    switch (type) {
+    case SQLITE_AFF_INTV_DY:
+    case SQLITE_AFF_INTV_HO:
+    case SQLITE_AFF_INTV_MI:
+    case SQLITE_AFF_INTV_SE:
+      intv = INTV_DSUS_TYPE;
+      break;
+    case SQLITE_AFF_INTV_YE:
+    case SQLITE_AFF_INTV_MO:
+      intv = INTV_YM_TYPE;
+      break;
+    default:
+      return SQLITE_ERROR;
+    }
+    if (str_to_interval(pMem->z, pMem->n, &intv, &tmp, &tmp2,
+     &pMem->du.tv.u.ds, &pMem->du.tv.sign) != 0) {
+      return SQLITE_ERROR;
+    }
+    if (intv == 0) {
+      switch(type) {
+      case SQLITE_AFF_INTV_YE:
+      case SQLITE_AFF_INTV_MO:
+        pMem->du.tv.type = INTV_YM_TYPE;
+        pMem->du.tv.u.ym.years = tmp;
+        pMem->du.tv.u.ym.months = tmp2;
+        break;
+      default:
+        return SQLITE_ERROR;
+      }
+    } else if (intv == 1) {
+      switch (type) {
+      case SQLITE_AFF_INTV_DY:
+      case SQLITE_AFF_INTV_HO:
+      case SQLITE_AFF_INTV_MI:
+        pMem->du.tv.type = INTV_DSUS_TYPE;
+      case SQLITE_AFF_INTV_SE:
+        pMem->du.tv.type = (pMem->du.tv.u.ds.prec == DTTZ_PREC_MSEC) ?
+          INTV_DS_TYPE : INTV_DSUS_TYPE;
+        break;
+      default:
+        return SQLITE_ERROR;
+      }
+    } else if (intv == 2) {
+num:  switch (type) {
+      case SQLITE_AFF_INTV_YE:
+        pMem->du.tv.type = INTV_YM_TYPE;
+        pMem->du.tv.u.ym.years = tmp;
+        break;
+      case SQLITE_AFF_INTV_MO:
+        pMem->du.tv.type = INTV_YM_TYPE;
+        pMem->du.tv.u.ym.months = tmp;
+        break;
+      case SQLITE_AFF_INTV_DY:
+        pMem->du.tv.type = INTV_DS_TYPE;
+        _setIntervalDS( &pMem->du.tv.u.ds, 24*3600*tmp, 0);
+        break;
+      case SQLITE_AFF_INTV_HO:
+        pMem->du.tv.type = INTV_DS_TYPE;
+        _setIntervalDS( &pMem->du.tv.u.ds, 3600*tmp, 0);
+        break;
+      case SQLITE_AFF_INTV_MI:
+        pMem->du.tv.type = INTV_DS_TYPE;
+        _setIntervalDS( &pMem->du.tv.u.ds, 60*tmp, 0);
+        break;
+      case SQLITE_AFF_INTV_SE:
+        if ((int)(tmp2 / 1E3) * 1000 == tmp2) {
+          pMem->du.tv.type = INTV_DS_TYPE;
+          _setIntervalDS(&pMem->du.tv.u.ds, tmp, tmp2 / 1000);
+        } else {
+          pMem->du.tv.type = INTV_DSUS_TYPE;
+          _setIntervalDSUS(&pMem->du.tv.u.ds, tmp, tmp2);
+        }
+        break;
+      default:
+        return SQLITE_ERROR;
+      }
+    } else {
+      return SQLITE_ERROR;
+    }
+  } else {
+    return SQLITE_ERROR;
+  }
+  pMem->flags &= ~(MEM_TypeMask);
+  pMem->flags |= MEM_Interval;
+  if (pMem->du.tv.type == INTV_YM_TYPE)
+    _normalizeIntervalYM(&pMem->du.tv.u.ym);
+  return SQLITE_OK;
+}
+
+/*
+**  Operate on two intervals, res = a opcode b;
+*/
+int sqlite3VdbeMemIntervalAndInterval(const Mem *a, const Mem *b, int opcode, Mem * res) {
+
+    bzero(res, sizeof(Mem));
+    res->flags |= MEM_Interval;
+    long long aa = 0, bb = 0;
+
+    switch(a->du.tv.type) {
+        case INTV_YM_TYPE:
+            aa = a->du.tv.sign*(int)(a->du.tv.u.ym.months + a->du.tv.u.ym.years*12);
+            bb = b->du.tv.sign*(int)(b->du.tv.u.ym.months + b->du.tv.u.ym.years*12);
+
+            if( opcode == OP_Add)  {
+                aa += bb;
+            } else if (opcode == OP_Subtract) {
+                aa -= bb;
+            } else return SQLITE_ERROR;
+
+            res->du.tv.type          = INTV_YM_TYPE;
+            res->du.tv.sign          = (aa<0)?-1:1;
+            res->du.tv.u.ym.months   = aa*res->du.tv.sign;
+            res->du.tv.u.ym.years    = 0;
+
+            _normalizeIntervalYM(&res->du.tv.u.ym);
+            break;
+
+        case INTV_DS_TYPE:
+            if (b->du.tv.type == INTV_DS_TYPE) {
+              aa = a->du.tv.sign*(int)(
+                                  a->du.tv.u.ds.frac +
+                  1000*           a->du.tv.u.ds.sec +
+                  1000*60*        a->du.tv.u.ds.mins +
+                  1000*3600*      a->du.tv.u.ds.hours +
+                  1000*3600*24*   a->du.tv.u.ds.days);
+              bb = b->du.tv.sign*(int)(
+                                  b->du.tv.u.ds.frac +
+                  1000*           b->du.tv.u.ds.sec +
+                  1000*60*        b->du.tv.u.ds.mins +
+                  1000*3600*      b->du.tv.u.ds.hours +
+                  1000*3600*24*   b->du.tv.u.ds.days);
+
+              if( opcode == OP_Add)  {
+                aa += bb;
+              } else if (opcode == OP_Subtract) {
+                aa -= bb;
+              } else return SQLITE_ERROR;
+
+              res->du.tv.type          = INTV_DS_TYPE;
+              res->du.tv.sign          = (aa<0)?-1:1;
+              aa = aa*res->du.tv.sign;
+              _setIntervalDS( &res->du.tv.u.ds, (((long long)aa)*res->du.tv.sign)/1000, (((int)aa)*res->du.tv.sign)%1000);
+            } else { // promote operand a to microsecond resolution
+              aa = a->du.tv.sign*(long long)(
+                  1000LL*            a->du.tv.u.ds.frac +
+                  1000000LL*         a->du.tv.u.ds.sec +
+                  1000000LL*60*      a->du.tv.u.ds.mins +
+                  1000000LL*3600*    a->du.tv.u.ds.hours +
+                  1000000LL*3600*24* a->du.tv.u.ds.days);
+              bb = b->du.tv.sign*(long long)(
+                                     b->du.tv.u.ds.frac +
+                  1000000LL*         b->du.tv.u.ds.sec +
+                  1000000LL*60*      b->du.tv.u.ds.mins +
+                  1000000LL*3600*    b->du.tv.u.ds.hours +
+                  1000000LL*3600*24* b->du.tv.u.ds.days);
+
+              if( opcode == OP_Add)  {
+                aa += bb;
+              } else if (opcode == OP_Subtract) {
+                aa -= bb;
+              } else return SQLITE_ERROR;
+
+              // promote the result of the expression to microsecond resolution
+              res->du.tv.type          = INTV_DSUS_TYPE;
+              res->du.tv.sign          = (aa<0)?-1:1;
+              aa = aa*res->du.tv.sign;
+              _setIntervalDSUS( &res->du.tv.u.ds, (((long long)aa)*res->du.tv.sign)/1000000, (((int)aa)*res->du.tv.sign)%1000000);
+            }
+
+            break;
+        case INTV_DSUS_TYPE:
+            if (b->du.tv.type == INTV_DS_TYPE) { // promote operand b to microsecond resolution
+              aa = a->du.tv.sign*(long long)(
+                                     a->du.tv.u.ds.frac +
+                  1000000LL*         a->du.tv.u.ds.sec +
+                  1000000LL*60*      a->du.tv.u.ds.mins +
+                  1000000LL*3600*    a->du.tv.u.ds.hours +
+                  1000000LL*3600*24* a->du.tv.u.ds.days);
+              bb = b->du.tv.sign*(long long)(
+                  1000LL*            b->du.tv.u.ds.frac +
+                  1000000LL*         b->du.tv.u.ds.sec +
+                  1000000LL*60*      b->du.tv.u.ds.mins +
+                  1000000LL*3600*    b->du.tv.u.ds.hours +
+                  1000000LL*3600*24* b->du.tv.u.ds.days);
+
+              if( opcode == OP_Add)  {
+                aa += bb;
+              } else if (opcode == OP_Subtract) {
+                aa -= bb;
+              } else return SQLITE_ERROR;
+
+              // promote the result of the expression to microsecond resolution
+              res->du.tv.type          = INTV_DSUS_TYPE;
+              res->du.tv.sign          = (aa<0)?-1:1;
+              aa = aa*res->du.tv.sign;
+              _setIntervalDSUS( &res->du.tv.u.ds, (((long long)aa)*res->du.tv.sign)/1000000, (((int)aa)*res->du.tv.sign)%1000000);
+            } else {
+              aa = a->du.tv.sign*(long long)(
+                                     a->du.tv.u.ds.frac +
+                  1000000LL*         a->du.tv.u.ds.sec +
+                  1000000LL*60*      a->du.tv.u.ds.mins +
+                  1000000LL*3600*    a->du.tv.u.ds.hours +
+                  1000000LL*3600*24* a->du.tv.u.ds.days);
+              bb = b->du.tv.sign*(long long)(
+                                     b->du.tv.u.ds.frac +
+                  1000000LL*         b->du.tv.u.ds.sec +
+                  1000000LL*60*      b->du.tv.u.ds.mins +
+                  1000000LL*3600*    b->du.tv.u.ds.hours +
+                  1000000LL*3600*24* b->du.tv.u.ds.days);
+
+              if( opcode == OP_Add)  {
+                aa += bb;
+              } else if (opcode == OP_Subtract) {
+                aa -= bb;
+              } else return SQLITE_ERROR;
+
+              res->du.tv.type          = INTV_DSUS_TYPE;
+              res->du.tv.sign          = (aa<0)?-1:1;
+              aa = aa*res->du.tv.sign;
+              _setIntervalDSUS( &res->du.tv.u.ds, (((long long)aa)*res->du.tv.sign)/1000000, (((int)aa)*res->du.tv.sign)%1000000);
+            }
+
+            break;
+
+        case INTV_DECIMAL_TYPE:
+            {
+               fprintf(stderr, "BUG, wrong function called, use Decimalfy %s:%d\n", __FILE__, __LINE__);
+               abort();
+            }
+    }
+    return 0;
+}
+
+/*
+**  Operate on interval and int, res = a opcode b;
+*/
+int sqlite3VdbeMemIntervalAndInt(const Mem *a, const Mem *b, int opcode, Mem * res) {
+    bzero(res, sizeof(Mem));
+    res->flags |= MEM_Interval;
+    long long aa = 0, bb = 0;
+
+    switch(a->du.tv.type) {
+        case INTV_YM_TYPE:
+            aa = a->du.tv.sign*(int)(a->du.tv.u.ym.months + a->du.tv.u.ym.years*12);
+            bb = b->u.i;
+
+            if( opcode == OP_Multiply)  {
+                aa *= bb;
+            } else if (opcode == OP_Divide) {
+                aa /= bb;
+            } else return SQLITE_ERROR;
+
+            res->du.tv.type          = INTV_YM_TYPE;
+            res->du.tv.sign          = (aa<0)?-1:1;
+            res->du.tv.u.ym.months   = aa*res->du.tv.sign;
+            res->du.tv.u.ym.years    = 0;
+
+            _normalizeIntervalYM(&res->du.tv.u.ym);
+            break;
+
+        case INTV_DS_TYPE:
+            aa = a->du.tv.sign*(int)(a->du.tv.u.ds.frac +
+                     1000*           a->du.tv.u.ds.sec +
+                     1000*60*        a->du.tv.u.ds.mins +
+                     1000*3600*      a->du.tv.u.ds.hours +
+                     1000*3600*24*   a->du.tv.u.ds.days);
+            bb = b->u.i;
+
+            if( opcode == OP_Multiply)  {
+                aa *= bb;
+            } else if (opcode == OP_Divide) {
+                aa /= bb;
+            } else return SQLITE_ERROR;
+
+            res->du.tv.type          = INTV_DS_TYPE;
+            res->du.tv.sign          = (aa<0)?-1:1;
+            aa = aa*res->du.tv.sign;
+            _setIntervalDS( &res->du.tv.u.ds, (((long long)aa)*res->du.tv.sign)/1000, (((int)aa)*res->du.tv.sign)%1000);
+            break;
+        case INTV_DSUS_TYPE:
+            aa = a->du.tv.sign*(long long)(
+                                        a->du.tv.u.ds.frac +
+                     1000000LL*         a->du.tv.u.ds.sec +
+                     1000000LL*60*      a->du.tv.u.ds.mins +
+                     1000000LL*3600*    a->du.tv.u.ds.hours +
+                     1000000LL*3600*24* a->du.tv.u.ds.days);
+            bb = b->u.i;
+
+            if( opcode == OP_Multiply)  {
+                aa *= bb;
+            } else if (opcode == OP_Divide) {
+                aa /= bb;
+            } else return SQLITE_ERROR;
+
+            res->du.tv.type          = INTV_DSUS_TYPE;
+            res->du.tv.sign          = (aa<0)?-1:1;
+            aa = aa*res->du.tv.sign;
+            _setIntervalDSUS( &res->du.tv.u.ds, (((long long)aa)*res->du.tv.sign)/1000000, (((int)aa)*res->du.tv.sign)%1000000);
+            break;
+        case INTV_DECIMAL_TYPE:
+            {
+               fprintf(stderr, "BUG, wrong function called, use Decimalfy %s:%d\n", __FILE__, __LINE__);
+               abort();
+            }
+    }
+    return 0;
+}
+
+/*
+**  Operate on interval and int, res = a opcode b;
+*/
+int sqlite3VdbeMemIntAndInterval(const Mem *a, const Mem *b, int opcode, Mem * res) {
+    bzero(res, sizeof(Mem));
+    res->flags |= MEM_Interval;
+    long long aa = 0, bb = 0;
+
+    switch(b->du.tv.type) {
+        case INTV_YM_TYPE:
+            aa = a->u.i;
+            bb = b->du.tv.sign*(int)(b->du.tv.u.ym.months + b->du.tv.u.ym.years*12);
+
+            if( opcode == OP_Multiply)  {
+                aa *= bb;
+            } else return -1;
+
+            res->du.tv.type          = INTV_YM_TYPE;
+            res->du.tv.sign          = (aa<0)?-1:1;
+            res->du.tv.u.ym.months   = aa*res->du.tv.sign;
+            res->du.tv.u.ym.years    = 0;
+
+            _normalizeIntervalYM(&res->du.tv.u.ym);
+            break;
+
+        case INTV_DS_TYPE:
+            aa = a->u.i;
+            bb = b->du.tv.sign*(int)(b->du.tv.u.ds.frac +
+                     1000*           b->du.tv.u.ds.sec +
+                     1000*60*        b->du.tv.u.ds.mins +
+                     1000*3600*      b->du.tv.u.ds.hours +
+                     1000*3600*24*   b->du.tv.u.ds.days);
+
+            if( opcode == OP_Multiply)  {
+                aa *= bb;
+            } else return -1;
+
+            res->du.tv.type          = INTV_DS_TYPE;
+            res->du.tv.sign          = (aa<0)?-1:1;
+            aa = aa*res->du.tv.sign;
+            _setIntervalDS( &res->du.tv.u.ds, (((long long)aa)*res->du.tv.sign)/1000, (((int)aa)*res->du.tv.sign)%1000);
+            break;
+        case INTV_DSUS_TYPE:
+            aa = a->u.i;
+            bb = b->du.tv.sign*(long long)(b->du.tv.u.ds.frac +
+                     1000000LL*         b->du.tv.u.ds.sec +
+                     1000000LL*60*      b->du.tv.u.ds.mins +
+                     1000000LL*3600*    b->du.tv.u.ds.hours +
+                     1000000LL*3600*24* b->du.tv.u.ds.days);
+
+            if( opcode == OP_Multiply)  {
+                aa *= bb;
+            } else return -1;
+
+            res->du.tv.type          = INTV_DSUS_TYPE;
+            res->du.tv.sign          = (aa<0)?-1:1;
+            aa = aa*res->du.tv.sign;
+            _setIntervalDSUS( &res->du.tv.u.ds, (((long long)aa)*res->du.tv.sign)/1000000, (((int)aa)*res->du.tv.sign)%1000000);
+            break;
+
+        case INTV_DECIMAL_TYPE:
+            {
+               fprintf(stderr, "BUG, wrong function called, use Decimalfy %s:%d\n", __FILE__, __LINE__);
+               abort();
+            }
+    }
+    return 0;
+}
+
+/*
+** Implement substraction of two datetimes
+** The result is a day-second interval
+*/
+int sqlite3VdbeMemDatetimeAndDatetime(const Mem *a, const Mem *b, int opcode, Mem *res) {
+  bzero(res, sizeof(Mem));
+  res->flags |= MEM_Interval;
+  if (opcode != OP_Subtract) return SQLITE_ERROR;
+  const dttz_t *d1 = &a->du.dt;
+  const dttz_t *d2 = &b->du.dt;
+  sub_dttz_dttz(d1, d2, &res->du.tv);
+  return 0;
+}
+
+static int _dttz_to_native_datetime(cdb2_client_datetime_t * cdt, const Mem *inp) {
+
+    char    tmp[11];
+    unsigned char buf[CLIENT_DATETIME_LEN];
+    unsigned char *p_buf=buf, *p_buf_end=(p_buf+CLIENT_DATETIME_LEN);
+    int     outnull = 0;
+    int     outdtsz  = 0; 
+
+    /* this is such a bad kludge, but we need it until we create a type conversion lib */
+    struct field_conv_opts_tz {
+        unsigned    flags;
+        int         dbpad;
+        char        tzname[33/*DB_MAX_TZNAMEDB*/];}
+                                                tzopts;
+
+    /* provide the timezone to the conversion routines */
+    bzero(&tzopts, sizeof(tzopts));
+    tzopts.flags |= 2 /*FLD_CONV_TZONE*/;
+    if(!inp->tz) return SQLITE_ERROR;
+    strncpy(tzopts.tzname, inp->tz, sizeof(tzopts.tzname));
+
+    /* ugly, arghh */
+    bzero(tmp, sizeof(tmp));
+
+    /* limit range to [-9999-01-01T235959.000 GMT, 9999-12-31T000000.000 GMT] */
+    if (!debug_switch_unlimited_datetime_range() && (inp->du.dt.dttz_sec < -377705030401ll || inp->du.dt.dttz_sec > 253402214400ll ))
+       return -1;
+
+    tmp[0] = 8;
+    *(long long*)&tmp[1] = flibc_htonll(inp->du.dt.dttz_sec);
+    tmp[1] ^= 0x80; 
+    *(unsigned short*)&tmp[9] = htons(
+        inp->du.dt.dttz_prec == DTTZ_PREC_MSEC ?
+        inp->du.dt.dttz_frac : inp->du.dt.dttz_frac / 1000);
+
+    if(SERVER_DATETIME_to_CLIENT_DATETIME(&tmp, sizeof(tmp),  
+              NULL, NULL,
+              buf, sizeof(buf), &outnull, &outdtsz,
+              (const struct field_conv_opts*)&tzopts, NULL))
+
+            return SQLITE_ERROR;
+
+    if(!(client_datetime_get(cdt,p_buf,p_buf_end)))
+    {
+        return SQLITE_ERROR;
+    }
+    
+    return 0;
+}
+
+static int _dttz_to_native_datetimeus(cdb2_client_datetimeus_t * cdt, const Mem *inp) {
+
+    char    tmp[13];
+    unsigned char buf[CLIENT_DATETIME_LEN];
+    unsigned char *p_buf=buf, *p_buf_end=(p_buf+CLIENT_DATETIME_LEN);
+    int     outnull = 0;
+    int     outdtsz  = 0; 
+
+    /* this is such a bad kludge, but we need it until we create a type conversion lib */
+    struct field_conv_opts_tz {
+        unsigned    flags;
+        int         dbpad;
+        char        tzname[33/*DB_MAX_TZNAMEDB*/];}
+                                                tzopts;
+
+    /* provide the timezone to the conversion routines */
+    bzero(&tzopts, sizeof(tzopts));
+    tzopts.flags |= 2 /*FLD_CONV_TZONE*/;
+    if(!inp->tz) return SQLITE_ERROR;
+    strncpy(tzopts.tzname, inp->tz, sizeof(tzopts.tzname));
+
+    /* ugly, arghh */
+    bzero(tmp, sizeof(tmp));
+
+    /* limit range to [-9999-01-01T235959.000 GMT, 9999-12-31T000000.000 GMT] */
+    if (!debug_switch_unlimited_datetime_range() && inp->du.dt.dttz_sec < -377705030401ll || inp->du.dt.dttz_sec > 253402214400ll)
+       return -1;
+
+    tmp[0] = 8;
+    *(long long*)&tmp[1] = flibc_htonll(inp->du.dt.dttz_sec);
+    tmp[1] ^= 0x80; 
+    *(unsigned short*)&tmp[9] = htonl(
+        inp->du.dt.dttz_prec == DTTZ_PREC_USEC ?
+        inp->du.dt.dttz_frac : inp->du.dt.dttz_frac * 1000);
+
+    if(SERVER_DATETIMEUS_to_CLIENT_DATETIMEUS(&tmp, sizeof(tmp),  
+              NULL, NULL,
+              buf, sizeof(buf), &outnull, &outdtsz,
+              (const struct field_conv_opts*)&tzopts, NULL))
+
+            return SQLITE_ERROR;
+
+    if(!(client_datetimeus_get(cdt,p_buf,p_buf_end)))
+    {
+        return SQLITE_ERROR;
+    }
+    
+    return 0;
+}
+
+static int _native_datetime_to_dttz(cdb2_client_datetime_t * cdt, Mem * res) {
+
+    char    tmp[11] = {0};
+    unsigned char buf[CLIENT_DATETIME_LEN];
+    unsigned char *p_buf=buf, *p_buf_end=(p_buf+CLIENT_DATETIME_LEN);
+    int     outdtsz  = 0; 
+
+    if(!(client_datetime_put(cdt,p_buf, p_buf_end)))
+    {
+        return SQLITE_ERROR;
+    }
+
+    if(CLIENT_DATETIME_to_SERVER_DATETIME(buf, sizeof(buf), 0, NULL, NULL,
+                    tmp, sizeof(tmp), &outdtsz, NULL, NULL)) return SQLITE_ERROR;
+
+    /* convert server datetime to native datetime */
+    tmp[1] ^= 0x80;
+    res->du.dt.dttz_sec   = flibc_ntohll(*(unsigned long long*)&tmp[1]);
+    res->du.dt.dttz_frac  = ntohl(*(unsigned short*)&tmp[9]);
+    res->du.dt.dttz_prec  = DTTZ_PREC_MSEC;
+
+    return 0;
+}
+
+static int _native_datetimeus_to_dttz(cdb2_client_datetimeus_t * cdt, Mem * res) {
+
+    char    tmp[13] = {0};
+    unsigned char buf[CLIENT_DATETIME_LEN];
+    unsigned char *p_buf=buf, *p_buf_end=(p_buf+CLIENT_DATETIME_LEN);
+    int     outdtsz  = 0; 
+
+    if(!(client_datetimeus_put(cdt,p_buf, p_buf_end)))
+    {
+        return SQLITE_ERROR;
+    }
+
+    if(CLIENT_DATETIMEUS_to_SERVER_DATETIMEUS(buf, sizeof(buf), 0, NULL, NULL,
+                    tmp, sizeof(tmp), &outdtsz, NULL, NULL)) return SQLITE_ERROR;
+
+    /* convert server datetime to native datetime */
+    tmp[1] ^= 0x80;
+    res->du.dt.dttz_sec   = flibc_ntohll(*(unsigned long long*)&tmp[1]);
+    res->du.dt.dttz_frac  = ntohl(*(unsigned int*)&tmp[9]);
+    res->du.dt.dttz_prec  = DTTZ_PREC_USEC;
+
+    return 0;
+}
+
+/* "b" better be normalized */
+int sqlite3VdbeMemDatetimeAndInterval(const Mem *a, const Mem *b, int opcode, Mem * res) {
+
+    bzero(res, sizeof(Mem));
+    res->flags |= MEM_Datetime;
+    res->tz = a->tz; /* propagate tzname */
+
+    /* operations */
+    if( b->du.tv.type == INTV_YM_TYPE) {
+        if (a->du.dt.dttz_prec == DTTZ_PREC_MSEC) {
+            cdb2_client_datetime_t   cdt;
+
+            /* convert server_datetime_t to cdb2_client_datetime_t */
+            if( _dttz_to_native_datetime(&cdt, a)) return SQLITE_ERROR;
+
+            if ((opcode == OP_Add && b->du.tv.sign >0) || 
+                (opcode == OP_Subtract && b->du.tv.sign <0)){
+              cdt.tm.tm_year  += b->du.tv.u.ym.years;
+              cdt.tm.tm_mon += b->du.tv.u.ym.months;
+            } else if ((opcode == OP_Add && b->du.tv.sign<0) || 
+                (opcode == OP_Subtract && b->du.tv.sign >0)){
+              cdt.tm.tm_year  -= b->du.tv.u.ym.years;
+              cdt.tm.tm_mon -= b->du.tv.u.ym.months;
+            } else return SQLITE_ERROR;
+
+            /* convert cdb2_client_datetime_t to server_datetime_t */
+            if(_native_datetime_to_dttz(&cdt, res)) return SQLITE_ERROR;
+        } else {
+            cdb2_client_datetimeus_t   cdt;
+
+            /* convert server_datetimeus_t to cdb2_client_datetimeus_t */
+            if( _dttz_to_native_datetimeus(&cdt, a)) return SQLITE_ERROR;
+
+            if ((opcode == OP_Add && b->du.tv.sign >0) || 
+                (opcode == OP_Subtract && b->du.tv.sign <0)){
+              cdt.tm.tm_year  += b->du.tv.u.ym.years;
+              cdt.tm.tm_mon += b->du.tv.u.ym.months;
+            } else if ((opcode == OP_Add && b->du.tv.sign<0) || 
+                (opcode == OP_Subtract && b->du.tv.sign >0)){
+              cdt.tm.tm_year  -= b->du.tv.u.ym.years;
+              cdt.tm.tm_mon -= b->du.tv.u.ym.months;
+            } else return SQLITE_ERROR;
+
+            /* convert cdb2_client_datetime_t to server_datetime_t */
+            if(_native_datetimeus_to_dttz(&cdt, res)) return SQLITE_ERROR;
+        }
+        res->du.dt.dttz_conv = (a->du.dt.dttz_conv == DTTZ_CONV_NOW);
+    } else if (b->du.tv.type == INTV_DS_TYPE || b->du.tv.type == INTV_DSUS_TYPE) {
+
+        if ((opcode == OP_Add && b->du.tv.sign >0) || (opcode == OP_Subtract && b->du.tv.sign <0))
+          add_dttz_intvds(&a->du.dt, &b->du.tv, &res->du.dt);
+        else if ((opcode == OP_Add && b->du.tv.sign<0) || (opcode == OP_Subtract && b->du.tv.sign >0))
+          sub_dttz_intvds(&a->du.dt, &b->du.tv, &res->du.dt);
+        else
+          return SQLITE_ERROR;
+    }
+    else
+    {
+       fprintf(stderr, "BUG, wrong function called, use Decimalfy %s:%d\n", __FILE__, __LINE__);
+       abort();
+    }
+
+    return 0;
+}
+
+int sqlite3VdbeMemIntervalAndDatetime(const Mem *a, const Mem *b, int opcode, Mem * res) {
+
+    bzero(res, sizeof(Mem));
+    res->flags |= MEM_Datetime;
+    res->tz = b->tz; /* propagate tzname */
+
+    if( a->du.tv.type == INTV_YM_TYPE) {
+        if (b->du.dt.dttz_prec == DTTZ_PREC_MSEC) {
+            cdb2_client_datetime_t   cdt;
+
+            /* convert server_datetime_t to cdb2_client_datetime_t */
+            if( _dttz_to_native_datetime(&cdt, b)) return SQLITE_ERROR;
+
+            /* operations */
+            if (opcode == OP_Add) {
+              cdt.tm.tm_year  += a->du.tv.u.ym.years;
+              cdt.tm.tm_mon += a->du.tv.u.ym.months;
+            } else return SQLITE_ERROR;
+
+            /* convert cdb2_client_datetime_t to server_datetime_t */
+            if(_native_datetime_to_dttz(&cdt, res)) return SQLITE_ERROR;
+        } else {
+            cdb2_client_datetimeus_t   cdt;
+
+            /* convert server_datetimeus_t to cdb2_client_datetimeus_t */
+            if( _dttz_to_native_datetimeus(&cdt, b)) return SQLITE_ERROR;
+
+            /* operations */
+            if (opcode == OP_Add) {
+              cdt.tm.tm_year  += a->du.tv.u.ym.years;
+              cdt.tm.tm_mon += a->du.tv.u.ym.months;
+            } else return SQLITE_ERROR;
+
+            /* convert cdb2_client_datetimeus_t to server_datetimeus_t */
+            if(_native_datetimeus_to_dttz(&cdt, res)) return SQLITE_ERROR;
+        }
+        res->du.dt.dttz_conv = (b->du.dt.dttz_conv == DTTZ_CONV_NOW);
+    } 
+    else if (a->du.tv.type == INTV_DS_TYPE || a->du.tv.type == INTV_DSUS_TYPE)
+    {
+        if (opcode == OP_Add)
+          add_dttz_intvds(&b->du.dt, &a->du.tv, &res->du.dt);
+        else
+          return SQLITE_ERROR;
+    }
+    else
+    {
+      fprintf( stderr, "%s:%d: No arithmetics between decimal and datetime\n",
+            __FILE__, __LINE__);
+      return SQLITE_ERROR;
+    }
+
+    return 0;
+}
+
+/*
+   Mem is an decimal type;
+   Mem is anything;
+ */
+int sqliteVdbeMemDecimalBasicArithmetics(Mem *a, Mem *b, int opcode, Mem * res, int flipped)
+{
+   decContext  ctx;
+   void        *ret = NULL;
+   int         rc = 0;
+
+   bzero(res, sizeof(Mem));
+   res->flags |= MEM_Interval;
+
+   switch (b->flags & MEM_TypeMask)
+   {
+      case MEM_Int:
+      case MEM_Str:
+      
+         rc = sqlite3VdbeMemDecimalfy( b);
+         if (rc)
+            goto done;
+
+         /* slide through */
+
+      case MEM_Interval:
+         {
+            Mem *tmp;
+
+            if(flipped)
+            {
+               tmp=b;
+               b=a;
+               a=tmp;
+            }
+
+            dec_ctx_init( &ctx, DEC_INIT_DECQUAD, gbl_decimal_rounding);
+      
+            switch( opcode)
+            {
+               case OP_Add:
+                  ret = decQuadAdd( (decQuad*)&res->du.tv.u.dec, 
+                        (const decQuad*)&a->du.tv.u.dec, 
+                        (const decQuad*)&b->du.tv.u.dec, 
+                        &ctx);
+                  break;
+
+               case OP_Subtract:
+                  ret = decQuadSubtract( (decQuad*)&res->du.tv.u.dec, 
+                        (const decQuad*)&a->du.tv.u.dec, 
+                        (const decQuad*)&b->du.tv.u.dec, 
+                        &ctx);
+                  break;
+
+               case OP_Divide:
+                  ret = decQuadDivide( (decQuad*)&res->du.tv.u.dec, 
+                        (const decQuad*)&a->du.tv.u.dec, 
+                        (const decQuad*)&b->du.tv.u.dec, 
+                        &ctx);
+                  break;
+
+               case OP_Multiply:
+                  ret = decQuadMultiply( (decQuad*)&res->du.tv.u.dec, 
+                        (const decQuad*)&a->du.tv.u.dec, 
+                        (const decQuad*)&b->du.tv.u.dec, 
+                        &ctx);
+                  break;
+
+               case OP_Remainder:
+                  ret = decQuadRemainder( (decQuad*)&res->du.tv.u.dec, 
+                        (const decQuad*)&a->du.tv.u.dec, 
+                        (const decQuad*)&b->du.tv.u.dec, 
+                        &ctx);
+                  break;
+
+               default:
+                  rc = SQLITE_ERROR;
+                  goto done;
+            }
+
+            
+            if (!ret)
+            {
+               rc = SQLITE_ERROR;
+               goto done;
+            }
+            else
+            {
+               if (dfp_conv_check_status( &ctx, "arithmetics", "quad"))
+               {
+                  rc = SQLITE_ERROR;
+                  goto done;
+               }
+            }
+
+            res->du.tv.type = INTV_DECIMAL_TYPE;
+            res->du.tv.sign = 0;
+         }
+         break;
+
+      default:
+         if(0)
+         {
+            fprintf( stderr, "%s:%d failed decimal arithmetics\n",
+                  __FILE__, __LINE__);
+         }
+         return SQLITE_ERROR;
+   }
+
+done:
+   return rc;
+}
+
+
+#endif /* SQLITE_BUILDING_FOR_COMDB2 */
+/* vim: set ts=2 sw=2 et: */

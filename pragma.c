@@ -283,6 +283,8 @@ void sqlite3Pragma(
   Vdbe *v = sqlite3GetVdbe(pParse);  /* Prepared statement */
   const struct sPragmaNames *pPragma;
 
+  if( pParse->explain != 0 ) return;
+
   if( v==0 ) return;
   sqlite3VdbeRunOnlyOnce(v);
   pParse->nMem = 2;
@@ -1504,7 +1506,7 @@ void sqlite3Pragma(
         sqlite3VdbeAddOp2(v, OP_Halt, 0, 0);
         sqlite3VdbeJumpHere(v, addr);
         sqlite3ExprCacheClear(pParse);
-        sqlite3OpenTableAndIndices(pParse, pTab, OP_OpenRead,
+        sqlite3OpenTableAndIndices(pParse, pTab, OP_OpenRead, 0,
                                    1, 0, &iDataCur, &iIdxCur);
         sqlite3VdbeAddOp2(v, OP_Integer, 0, 7);
         for(j=0, pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext, j++){

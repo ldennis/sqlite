@@ -67,7 +67,7 @@
 ** at all times.
 */
 #ifndef SQLITE_MAX_EXPR_DEPTH
-# define SQLITE_MAX_EXPR_DEPTH 1000
+# define SQLITE_MAX_EXPR_DEPTH 3000
 #endif
 
 /*
@@ -124,15 +124,17 @@
 ** is used internally to track attached databases.
 */
 #ifndef SQLITE_MAX_ATTACHED
-# define SQLITE_MAX_ATTACHED 10
+# define SQLITE_MAX_ATTACHED 100
 #endif
 
 
 /*
 ** The maximum value of a ?nnn wildcard that the parser will accept.
+** COMDB2 MODIFICATION
+** Comdb2 needs 1024 variables because Oracle has 1000, and DB2 has 1012.
 */
 #ifndef SQLITE_MAX_VARIABLE_NUMBER
-# define SQLITE_MAX_VARIABLE_NUMBER 999
+# define SQLITE_MAX_VARIABLE_NUMBER 2048
 #endif
 
 /* Maximum page size.  The upper bound on this value is 65536.  This a limit

@@ -124,7 +124,11 @@ END {
   # to make code generation for the switch() statement smaller and faster.
   for(i=0; i<n_op; i++){
     name = order[i];
-    if( op[name]>=0 ) continue;
+    if( op[name]>=0 )     
+    {
+        max = max > op[name] ? max : op[name]
+        continue;
+    }
     if( name=="OP_Function"      \
      || name=="OP_AggStep"       \
      || name=="OP_Transaction"   \
@@ -160,7 +164,7 @@ END {
       def[cnt] = name
     }
   }
-  max = cnt
+  max = max > cnt ? max : cnt
   for(i=1; i<=max; i++){
     if( !used[i] ){
       def[i] = "OP_NotUsed_" i 

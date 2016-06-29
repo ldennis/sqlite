@@ -15,6 +15,7 @@
 ** accessed by users of the library.
 */
 #include "sqliteInt.h"
+#include <sqlglue.h>
 
 #ifdef SQLITE_ENABLE_FTS3
 # include "fts3.h"
@@ -24,6 +25,10 @@
 #endif
 #ifdef SQLITE_ENABLE_ICU
 # include "sqliteicu.h"
+#endif
+/* COMDB2 MODIFICATION */
+#ifdef SQLITE_BUILDING_FOR_COMDB2
+# include "comdb2systbl.h"
 #endif
 
 #ifndef SQLITE_AMALGAMATION
@@ -82,6 +87,16 @@ char *sqlite3_temp_directory = 0;
 ** See also the "PRAGMA data_store_directory" SQL command.
 */
 char *sqlite3_data_directory = 0;
+
+
+/* COMDB2 MODIFICATION */
+static int sqlite3PCacheBufferSetup(void *dummy, ...) { return 0; }
+static int sqlite3PcacheInitialize(void) { return 0; }
+static int sqlite3PcacheShutdown(void) { return 0; }
+static int sqlite3PCacheSetDefault(void) { return 0; }
+int sqlite3HeaderSizeBtree(void) { return 0; }
+int sqlite3HeaderSizePcache(void){ return 0; } 
+int sqlite3HeaderSizePcache1(void){ return 0; } 
 
 /*
 ** Initialize SQLite.  
@@ -835,6 +850,17 @@ static int nocaseCollatingFunc(
 }
 
 /*
+** Dummy collating sequence used by datacopy index
+*/
+static int datacopyCollatingFunc(
+  void *NotUsed,
+  int nKey1, const void *pKey1,
+  int nKey2, const void *pKey2
+){
+  return 0;
+}
+
+/*
 ** Return the ROWID of the most recent insert
 */
 sqlite_int64 sqlite3_last_insert_rowid(sqlite3 *db){
@@ -913,15 +939,21 @@ static void functionDestroy(sqlite3 *db, FuncDef *p){
 static void disconnectAllVtab(sqlite3 *db){
 #ifndef SQLITE_OMIT_VIRTUALTABLE
   int i;
+  HashElem *p;
   sqlite3BtreeEnterAll(db);
   for(i=0; i<db->nDb; i++){
     Schema *pSchema = db->aDb[i].pSchema;
     if( db->aDb[i].pSchema ){
-      HashElem *p;
       for(p=sqliteHashFirst(&pSchema->tblHash); p; p=sqliteHashNext(p)){
         Table *pTab = (Table *)sqliteHashData(p);
         if( IsVirtual(pTab) ) sqlite3VtabDisconnect(db, pTab);
       }
+    }
+  }
+  for(p=sqliteHashFirst(&db->aModule); p; p=sqliteHashNext(p)){
+    Module *pMod = (Module *)sqliteHashData(p);
+    if( pMod->pEpoTab ){
+      sqlite3VtabDisconnect(db, pMod->pEpoTab);
     }
   }
   sqlite3VtabUnlockList(db);
@@ -976,6 +1008,10 @@ static int sqlite3Close(sqlite3 *db, int forceZombie){
   ** SQLITE_BUSY if the connection can not be closed immediately.
   */
   if( !forceZombie && connectionIsBusy(db) ){
+    /* COMDB2 MODIFICATION */
+    printf("%s:%d SQLITE_BUSY\n", __FILE__, __LINE__);
+    cheap_stack_trace();
+
     sqlite3ErrorWithMsg(db, SQLITE_BUSY, "unable to close due to unfinalized "
        "statements or unfinished backups");
     sqlite3_mutex_leave(db->mutex);
@@ -1101,6 +1137,7 @@ void sqlite3LeaveMutexAndCloseZombie(sqlite3 *db){
     if( pMod->xDestroy ){
       pMod->xDestroy(pMod->pAux);
     }
+    sqlite3VtabEponymousTableClear(db, pMod);
     sqlite3DbFree(db, pMod);
   }
   sqlite3HashClear(&db->aModule);
@@ -1327,6 +1364,9 @@ const char *sqlite3ErrStr(int rc){
     /* SQLITE_FORMAT      */ "auxiliary database format error",
     /* SQLITE_RANGE       */ "bind or column index out of range",
     /* SQLITE_NOTADB      */ "file is encrypted or is not a database",
+
+    /* COMDB2 MODIFICATION */
+    /* SQLITE_DEADLOCK    */ "transaction has been aborted due to deadlock",
   };
   const char *zErr = "unknown error";
   switch( rc ){
@@ -1564,6 +1604,10 @@ int sqlite3CreateFunc(
   p = sqlite3FindFunction(db, zFunctionName, nName, nArg, (u8)enc, 0);
   if( p && (p->funcFlags & SQLITE_FUNC_ENCMASK)==enc && p->nArg==nArg ){
     if( db->nVdbeActive ){
+      /* COMDB2 MODIFICATION */
+      printf("%s:%d SQLITE_BUSY\n", __FILE__, __LINE__);
+      cheap_stack_trace();
+
       sqlite3ErrorWithMsg(db, SQLITE_BUSY, 
         "unable to delete/modify user-function due to active statements");
       assert( !db->mallocFailed );
@@ -2215,6 +2259,10 @@ static int createCollation(
   pColl = sqlite3FindCollSeq(db, (u8)enc2, zName, 0);
   if( pColl && pColl->xCmp ){
     if( db->nVdbeActive ){
+      /* COMDB2 MODIFICATION */
+      printf("%s:%d SQLITE_BUSY\n", __FILE__, __LINE__);
+      cheap_stack_trace();
+
       sqlite3ErrorWithMsg(db, SQLITE_BUSY, 
         "unable to delete/modify collation sequence due to active statements");
       return SQLITE_BUSY;
@@ -2610,6 +2658,33 @@ int sqlite3ParseUri(
   return rc;
 }
 
+static void register_lua_sfuncs(sqlite3 *db, struct sqlthdstate *thd)
+{
+  char **funcs;
+  int num_funcs;
+  get_sfuncs(&funcs, &num_funcs);
+  for (int i = 0; i < num_funcs; ++i) {
+    lua_func_arg_t *arg = malloc(sizeof(lua_func_arg_t));
+    arg->thd = thd;
+    arg->name = funcs[i];
+    sqlite3_create_function_v2(db, funcs[i], -1, SQLITE_UTF8, arg, lua_func,
+                               NULL, NULL, free);
+  }
+}
+
+static void register_lua_afuncs(sqlite3 *db, struct sqlthdstate *thd)
+{
+  char **funcs;
+  int num_funcs;
+  get_afuncs(&funcs, &num_funcs);
+  for (int i = 0; i < num_funcs; ++i) {
+    lua_func_arg_t *arg = malloc(sizeof(lua_func_arg_t));
+    arg->thd = thd;
+    arg->name = funcs[i];
+    sqlite3_create_function_v2(db, funcs[i], -1, SQLITE_UTF8, arg, NULL,
+                               lua_step, lua_final, free);
+  }
+}
 
 /*
 ** This routine does the work of opening a database on behalf of
@@ -2620,7 +2695,8 @@ static int openDatabase(
   const char *zFilename, /* Database filename UTF-8 encoded */
   sqlite3 **ppDb,        /* OUT: Returned database handle */
   unsigned int flags,    /* Operational flags */
-  const char *zVfs       /* Name of the VFS to use */
+  const char *zVfs,      /* Name of the VFS to use */
+  struct sqlthdstate *thd
 ){
   sqlite3 *db;                    /* Store allocated handle here */
   int rc;                         /* Return code */
@@ -2770,6 +2846,9 @@ static int openDatabase(
   assert( db->pDfltColl!=0 );
 
   /* Parse the filename/URI argument. */
+  /* COMDB2 MODIFICATION */
+  createCollation(db, "DATACOPY", SQLITE_UTF8, 0, datacopyCollatingFunc, 0);
+
   db->openFlags = flags;
   rc = sqlite3ParseUri(zVfs, zFilename, &flags, &db->pVfs, &zOpen, &zErrMsg);
   if( rc!=SQLITE_OK ){
@@ -2854,8 +2933,21 @@ static int openDatabase(
 #endif
 
 #ifdef SQLITE_ENABLE_RTREE
-  if( !db->mallocFailed && rc==SQLITE_OK){
+  if( !db->mallocFailed && rc==SQLITE_OK ){
     rc = sqlite3RtreeInit(db);
+  }
+#endif
+
+#ifdef SQLITE_ENABLE_DBSTAT_VTAB
+  if( !db->mallocFailed && rc==SQLITE_OK ){
+    rc = sqlite3DbstatRegister(db);
+  }
+#endif
+
+/* COMDB2 MODIFICATION */
+#ifdef SQLITE_BUILDING_FOR_COMDB2
+  if( !db->mallocFailed && rc==SQLITE_OK ){
+    rc = comdb2SystblInit(db);
   }
 #endif
 
@@ -2900,6 +2992,12 @@ opendb_out:
     sqlite3GlobalConfig.xSqllog(pArg, db, zFilename, 0);
   }
 #endif
+
+  /* COMDB2 MODIFICATION */
+  register_lua_sfuncs(db, thd);
+  register_lua_afuncs(db, thd);
+  register_date_functions(db); 
+
   return sqlite3ApiExit(0, rc);
 }
 
@@ -2908,10 +3006,25 @@ opendb_out:
 */
 int sqlite3_open(
   const char *zFilename, 
-  sqlite3 **ppDb 
-){
-  return openDatabase(zFilename, ppDb,
-                      SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0);
+  sqlite3 **ppDb,
+  struct sqlthdstate *thd
+  ){
+    int rc;
+
+#ifdef DEBUG_SQLITE_MEMORY
+    extern void sqlite_init_start(void);
+    sqlite_init_start();
+#endif
+
+    rc = openDatabase(zFilename, ppDb,
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0, thd);
+
+#ifdef DEBUG_SQLITE_MEMORY
+    extern void sqlite_init_end(void);
+    sqlite_init_end();
+#endif
+
+    return rc;
 }
 int sqlite3_open_v2(
   const char *filename,   /* Database filename (UTF-8) */
@@ -2919,7 +3032,7 @@ int sqlite3_open_v2(
   int flags,              /* Flags */
   const char *zVfs        /* Name of VFS module to use */
 ){
-  return openDatabase(filename, ppDb, (unsigned int)flags, zVfs);
+  return openDatabase(filename, ppDb, (unsigned int)flags, zVfs, NULL);
 }
 
 #ifndef SQLITE_OMIT_UTF16
@@ -2948,7 +3061,7 @@ int sqlite3_open16(
   zFilename8 = sqlite3ValueText(pVal, SQLITE_UTF8);
   if( zFilename8 ){
     rc = openDatabase(zFilename8, ppDb,
-                      SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0);
+                      SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL);
     assert( *ppDb || rc==SQLITE_NOMEM );
     if( rc==SQLITE_OK && !DbHasProperty(*ppDb, 0, DB_SchemaLoaded) ){
       SCHEMA_ENC(*ppDb) = ENC(*ppDb) = SQLITE_UTF16NATIVE;

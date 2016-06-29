@@ -46,6 +46,11 @@
 #include "sqliteInt.h"
 #if SQLITE_OS_UNIX              /* This file is used on unix only */
 
+/* COMDB2 MODIFICATION */
+#ifdef SQLITE_UNIX_THREADS
+#include <pthread.h>
+#endif
+
 /*
 ** There are various methods for file locking used for concurrency
 ** control:
@@ -1568,6 +1573,10 @@ static int unixLock(sqlite3_file *id, int eFileLock){
   if( (pFile->eFileLock!=pInode->eFileLock && 
           (pInode->eFileLock>=PENDING_LOCK || eFileLock>SHARED_LOCK))
   ){
+    /* COMDB2 MODIFICATION */
+    printf("%s:%d SQLITE_BUSY\n", __FILE__, __LINE__);
+    cheap_stack_trace();
+
     rc = SQLITE_BUSY;
     goto end_lock;
   }
@@ -1605,6 +1614,11 @@ static int unixLock(sqlite3_file *id, int eFileLock){
       if( rc!=SQLITE_BUSY ){
         storeLastErrno(pFile, tErrno);
       }
+
+      /* COMDB2 MODIFICATION */
+      printf("%s:%d SQLITE_BUSY\n", __FILE__, __LINE__);
+      cheap_stack_trace();
+
       goto end_lock;
     }
   }
@@ -1634,6 +1648,10 @@ static int unixLock(sqlite3_file *id, int eFileLock){
       /* This could happen with a network mount */
       tErrno = errno;
       rc = SQLITE_IOERR_UNLOCK; 
+      /* COMDB2 MODIFICATION */
+      printf("%s:%d SQLITE_BUSY\n", __FILE__, __LINE__);
+      cheap_stack_trace();
+
     }
 
     if( rc ){
@@ -1649,6 +1667,11 @@ static int unixLock(sqlite3_file *id, int eFileLock){
   }else if( eFileLock==EXCLUSIVE_LOCK && pInode->nShared>1 ){
     /* We are trying for an exclusive lock but another thread in this
     ** same process is still holding a shared lock. */
+
+    /* COMDB2 MODIFICATION */
+    printf("%s:%d SQLITE_BUSY\n", __FILE__, __LINE__);
+    cheap_stack_trace();
+
     rc = SQLITE_BUSY;
   }else{
     /* The request was for a RESERVED or EXCLUSIVE lock.  It is
@@ -1672,6 +1695,11 @@ static int unixLock(sqlite3_file *id, int eFileLock){
       rc = sqliteErrorFromPosixError(tErrno, SQLITE_IOERR_LOCK);
       if( rc!=SQLITE_BUSY ){
         storeLastErrno(pFile, tErrno);
+      }
+      /* COMDB2 MODIFICATION */
+      if( rc == SQLITE_BUSY ){
+          printf("%s:%d SQLITE_BUSY\n", __FILE__, __LINE__);
+          cheap_stack_trace();
       }
     }
   }
@@ -5419,35 +5447,14 @@ static int fillInUnixFile(
   return rc;
 }
 
+char *comdb2_get_tmp_dir(void);
+
 /*
 ** Return the name of a directory in which to put temporary files.
 ** If no suitable temporary file directory can be found, return NULL.
 */
 static const char *unixTempFileDir(void){
-  static const char *azDirs[] = {
-     0,
-     0,
-     0,
-     "/var/tmp",
-     "/usr/tmp",
-     "/tmp",
-     0        /* List terminator */
-  };
-  unsigned int i;
-  struct stat buf;
-  const char *zDir = 0;
-
-  azDirs[0] = sqlite3_temp_directory;
-  if( !azDirs[1] ) azDirs[1] = getenv("SQLITE_TMPDIR");
-  if( !azDirs[2] ) azDirs[2] = getenv("TMPDIR");
-  for(i=0; i<sizeof(azDirs)/sizeof(azDirs[0]); zDir=azDirs[i++]){
-    if( zDir==0 ) continue;
-    if( osStat(zDir, &buf) ) continue;
-    if( !S_ISDIR(buf.st_mode) ) continue;
-    if( osAccess(zDir, 07) ) continue;
-    break;
-  }
-  return zDir;
+   return comdb2_get_tmp_dir();
 }
 
 /*
@@ -7530,7 +7537,12 @@ int sqlite3_os_init(void){
 
   /* Double-check that the aSyscall[] array has been constructed
   ** correctly.  See ticket [bb3a86e890c8e96ab] */
+/* COMDB2 */
+#ifndef _IBM_SOURCE
   assert( ArraySize(aSyscall)==25 );
+#else
+  assert( ArraySize(aSyscall)==21 );
+#endif
 
   /* Register all VFSes defined in the aVfs[] array */
   for(i=0; i<(sizeof(aVfs)/sizeof(sqlite3_vfs)); i++){

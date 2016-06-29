@@ -949,14 +949,16 @@ u8 sqlite3GetVarint32(const unsigned char *p, u32 *v){
   ** by the getVarin32() macro */
   a = *p;
   /* a: p0 (unmasked) */
-#ifndef getVarint32
+  /*COMDB2 MODIFICATION */
+  /*#ifndef getVarint32*/
   if (!(a&0x80))
   {
     /* Values between 0 and 127 */
     *v = a;
     return 1;
   }
-#endif
+  /*COMDB2 MODIFICATION */
+  /*#endif*/
 
   /* The 2-byte case */
   p++;
@@ -1340,7 +1342,8 @@ LogEst sqlite3LogEst(u64 x){
   return a[x&7] + y - 10;
 }
 
-#ifndef SQLITE_OMIT_VIRTUALTABLE
+/* COMDB2 MODIFICATION */
+/*#ifndef SQLITE_OMIT_VIRTUALTABLE */
 /*
 ** Convert a double into a LogEst
 ** In other words, compute an approximation for 10*log2(x).
@@ -1355,7 +1358,8 @@ LogEst sqlite3LogEstFromDouble(double x){
   e = (a>>52) - 1022;
   return e*10;
 }
-#endif /* SQLITE_OMIT_VIRTUALTABLE */
+/* COMDB2 MODIFICATION */
+/* #endif */ /* SQLITE_OMIT_VIRTUALTABLE */
 
 /*
 ** Convert a LogEst into an integer.

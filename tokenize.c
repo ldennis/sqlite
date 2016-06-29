@@ -122,6 +122,16 @@ int sqlite3GetToken(const unsigned char *z, int *tokenType){
       *tokenType = TK_SPACE;
       return i;
     }
+    case '{': {
+      i = 1;
+      while (z[i] != 0)
+        ++i;
+      if (z[i - 1] == '}')
+        *tokenType = TK_NOSQL;
+      else
+        *tokenType = TK_ILLEGAL;
+      return i;
+    }
     case '-': {
       if( z[1]=='-' ){
         for(i=2; (c=z[i])!=0 && c!='\n'; i++){}

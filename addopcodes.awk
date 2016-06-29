@@ -15,10 +15,18 @@ BEGIN {
 }
 END {
   printf "#define TK_%-29s %4d\n", "TO_TEXT",         ++max
+  printf "#define TK_%-29s %4d\n", "TO_DATETIME",     ++max
+  printf "#define TK_%-29s %4d\n", "TO_INTERVAL_YE",  ++max
+  printf "#define TK_%-29s %4d\n", "TO_INTERVAL_MO",  ++max
+  printf "#define TK_%-29s %4d\n", "TO_INTERVAL_DY",  ++max
+  printf "#define TK_%-29s %4d\n", "TO_INTERVAL_HO",  ++max
+  printf "#define TK_%-29s %4d\n", "TO_INTERVAL_MI",  ++max
+  printf "#define TK_%-29s %4d\n", "TO_INTERVAL_SE",  ++max
   printf "#define TK_%-29s %4d\n", "TO_BLOB",         ++max
   printf "#define TK_%-29s %4d\n", "TO_NUMERIC",      ++max
   printf "#define TK_%-29s %4d\n", "TO_INT",          ++max
   printf "#define TK_%-29s %4d\n", "TO_REAL",         ++max
+  printf "#define TK_%-29s %4d\n", "TO_DECIMAL",      ++max
   printf "#define TK_%-29s %4d\n", "ISNOT",           ++max
   printf "#define TK_%-29s %4d\n", "END_OF_FILE",     ++max
   printf "#define TK_%-29s %4d\n", "ILLEGAL",         ++max
@@ -31,4 +39,5 @@ END {
   printf "#define TK_%-29s %4d\n", "UMINUS",          ++max
   printf "#define TK_%-29s %4d\n", "UPLUS",           ++max
   printf "#define TK_%-29s %4d\n", "REGISTER",        ++max
+  printf "#define TK_%-29s %4d\n", "ASTERISK",        ++max
 }

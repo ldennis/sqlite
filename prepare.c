@@ -15,6 +15,13 @@
 */
 #include "sqliteInt.h"
 
+/* COMDB2 MODIFICATION */
+#include "vdbeInt.h"
+#include <time.h>
+#include <ctype.h>
+#include <datetime.h>
+void comdb2SetWriteFlag(int);
+
 /*
 ** Fill the InitData structure with an error message that indicates
 ** that the database is corrupt.
@@ -28,10 +35,10 @@ static void corruptSchema(
   if( !db->mallocFailed && (db->flags & SQLITE_RecoveryMode)==0 ){
     if( zObj==0 ) zObj = "?";
     sqlite3SetString(pData->pzErrMsg, db,
-      "malformed database schema (%s)", zObj);
+		     "malformed database schema (%s)", zObj);
     if( zExtra ){
-      *pData->pzErrMsg = sqlite3MAppendf(db, *pData->pzErrMsg, 
-                                 "%s - %s", *pData->pzErrMsg, zExtra);
+      *pData->pzErrMsg = sqlite3MAppendf(db, *pData->pzErrMsg,
+					 "%s - %s", *pData->pzErrMsg, zExtra);
     }
   }
   pData->rc = db->mallocFailed ? SQLITE_NOMEM : SQLITE_CORRUPT_BKPT;
@@ -81,6 +88,11 @@ int sqlite3InitCallback(void *pInit, int argc, char **argv, char **NotUsed){
     db->init.iDb = iDb;
     db->init.newTnum = sqlite3Atoi(argv[1]);
     db->init.orphanTrigger = 0;
+
+    extern int gbl_fdb_track;
+    if (gbl_fdb_track)
+       fprintf(stderr, "Prep iDb=%d \"%s\"\n", iDb, argv[2]);
+
     TESTONLY(rcp = ) sqlite3_prepare(db, argv[2], -1, &pStmt, 0);
     rc = db->errCode;
     assert( (rc&0xFF)==(rcp&0xFF) );
@@ -155,7 +167,8 @@ static int sqlite3InitOne(sqlite3 *db, int iDb, char **pzErrMsg){
      "  name text,\n"
      "  tbl_name text,\n"
      "  rootpage integer,\n"
-     "  sql text\n"
+     "  sql text,\n"
+     "  csc2 text"          /* COMDB2 MODIFICATION */
      ")"
   ;
 #ifndef SQLITE_OMIT_TEMPDB
@@ -188,27 +201,41 @@ static int sqlite3InitOne(sqlite3 *db, int iDb, char **pzErrMsg){
   }
   zMasterName = SCHEMA_TABLE(iDb);
 
-  /* Construct the schema tables.  */
-  azArg[0] = zMasterName;
-  azArg[1] = "1";
-  azArg[2] = zMasterSchema;
-  azArg[3] = 0;
-  initData.db = db;
-  initData.iDb = iDb;
-  initData.rc = SQLITE_OK;
-  initData.pzErrMsg = pzErrMsg;
-  sqlite3InitCallback(&initData, 3, (char **)azArg, 0);
-  if( initData.rc ){
-    rc = initData.rc;
-    goto error_out;
+  /* have we created already sqlite_master for this one?
+  ** COMDB2_changes: remote shares the same sqlite_master with "main"
+  **/
+  pTab = sqlite3FindTableCheckOnly(db, zMasterName, /*(iDb<=1)?(db->aDb[iDb].zName):(db->aDb[0].zName)*/ db->aDb[iDb].zName);
+  if(pTab == NULL)
+  {
+    azArg[0] = zMasterName;
+    azArg[1] = "1";
+    azArg[2] = zMasterSchema;
+    azArg[3] = 0;
+    initData.db = db;
+    initData.iDb = iDb;
+    initData.rc = SQLITE_OK;
+    initData.pzErrMsg = pzErrMsg;
+    sqlite3InitCallback(&initData, 3, (char **)azArg, 0);
+    if( initData.rc ){
+      rc = initData.rc;
+      goto error_out;
+    }
+    pTab = sqlite3FindTableCheckOnly(db, zMasterName, db->aDb[iDb].zName);
   }
-  pTab = sqlite3FindTable(db, zMasterName, db->aDb[iDb].zName);
+  else
+    {
+      initData.db = db;
+      initData.iDb = iDb;
+      initData.rc = SQLITE_OK;
+      initData.pzErrMsg = pzErrMsg;
+    }
+
   if( ALWAYS(pTab) ){
     pTab->tabFlags |= TF_Readonly;
   }
 
   /* Create a cursor to hold the database open
-  */
+  **/
   pDb = &db->aDb[iDb];
   if( pDb->pBt==0 ){
     if( !OMIT_TEMPDB && ALWAYS(iDb==1) ){
@@ -218,11 +245,12 @@ static int sqlite3InitOne(sqlite3 *db, int iDb, char **pzErrMsg){
   }
 
   /* If there is not already a read-only (or read-write) transaction opened
-  ** on the b-tree database, open one now. If a transaction is opened, it 
+  ** on the b-tree database, open one now. If a transaction is opened, it
   ** will be closed before this function returns.  */
   sqlite3BtreeEnter(pDb->pBt);
   if( !sqlite3BtreeIsInReadTrans(pDb->pBt) ){
     rc = sqlite3BtreeBeginTrans(pDb->pBt, 0);
+    comdb2SetWriteFlag(0);
     if( rc!=SQLITE_OK ){
       sqlite3SetString(pzErrMsg, db, "%s", sqlite3ErrStr(rc));
       goto initone_error_out;
@@ -266,13 +294,13 @@ static int sqlite3InitOne(sqlite3 *db, int iDb, char **pzErrMsg){
       if( encoding==0 ) encoding = SQLITE_UTF8;
       ENC(db) = encoding;
 #else
-      ENC(db) = SQLITE_UTF8;
+      SCHEMA_ENC(db) = SQLITE_UTF8;
 #endif
     }else{
       /* If opening an attached database, the encoding much match ENC(db) */
       if( meta[BTREE_TEXT_ENCODING-1]!=ENC(db) ){
         sqlite3SetString(pzErrMsg, db, "attached databases must use the same"
-            " text encoding as main database");
+			 " text encoding as main database");
         rc = SQLITE_ERROR;
         goto initone_error_out;
       }
@@ -323,9 +351,9 @@ static int sqlite3InitOne(sqlite3 *db, int iDb, char **pzErrMsg){
   assert( db->init.busy );
   {
     char *zSql;
-    zSql = sqlite3MPrintf(db, 
+    zSql = sqlite3MPrintf(db,
         "SELECT name, rootpage, sql FROM '%q'.%s ORDER BY rowid",
-        db->aDb[iDb].zName, zMasterName);
+        /*(iDb>1)?db->aDb[0].zName:db->aDb[iDb].zName*/db->aDb[iDb].zName, zMasterName);
 #ifndef SQLITE_OMIT_AUTHORIZATION
     {
       sqlite3_xauth xAuth;
@@ -351,7 +379,7 @@ static int sqlite3InitOne(sqlite3 *db, int iDb, char **pzErrMsg){
   }
   if( rc==SQLITE_OK || (db->flags&SQLITE_RecoveryMode)){
     /* Black magic: If the SQLITE_RecoveryMode flag is set, then consider
-    ** the schema loaded, even if errors occurred. In this situation the 
+    ** the schema loaded, even if errors occurred. In this situation the
     ** current sqlite3_prepare() operation will fail, but the following one
     ** will attempt to compile the supplied statement against whatever subset
     ** of the schema was loaded before the error occurred. The primary
@@ -380,27 +408,46 @@ error_out:
 }
 
 /*
-** Initialize all database files - the main database file, the file
-** used to store temporary tables, and any additional database files
-** created using ATTACH statements.  Return a success code.  If an
-** error occurs, write an error message into *pzErrMsg.
 **
-** After a database is initialized, the DB_SchemaLoaded bit is set
-** bit is set in the flags field of the Db structure. If the database
-** file was of zero-length, then the DB_Empty flag is also set.
+** Please see int sqlite3Init(sqlite3 *db, char **pzErrMsg)
+** The additional parameter, zName, allows initializing only
+** one table in that database, to support dynamically attached
+** tables.  If it is NULL, all the tables are initialized
 */
-int sqlite3Init(sqlite3 *db, char **pzErrMsg){
+int sqlite3InitTable(sqlite3 *db, char **pzErrMsg, const char *zName)
+{
   int i, rc;
   int commit_internal = !(db->flags&SQLITE_InternChanges);
-  
+  char *tmp;
+  char dbname[32];   /* ok, this needs to ship! */
+
   assert( sqlite3_mutex_held(db->mutex) );
   assert( sqlite3BtreeHoldsMutex(db->aDb[0].pBt) );
   assert( db->init.busy==0 );
   rc = SQLITE_OK;
   db->init.busy = 1;
+  /* COMDB2 MODIFICATION */
+  dbname[0] = '\0';
+  if( zName ){
+    db->init.zTblName = strdup(zName);
+    tmp = strchr(db->init.zTblName, '.');
+    if( tmp ){
+      memcpy(dbname, db->init.zTblName, tmp-db->init.zTblName);
+      dbname[tmp-db->init.zTblName+1] = '\0';
+      memmove(db->init.zTblName, tmp+1, strlen(tmp));
+    }else{
+      fprintf(stderr, "%s: confusing name %s\n", __func__, db->init.zTblName);
+      dbname[0] = '\0';
+    }
+  }
+
   ENC(db) = SCHEMA_ENC(db);
   for(i=0; rc==SQLITE_OK && i<db->nDb; i++){
-    if( DbHasProperty(db, i, DB_SchemaLoaded) || i==1 ) continue;
+    if(i==1 || DbHasProperty(db, i, DB_SchemaLoaded) && (i==0 || (!zName && i>1))) continue;
+    /* remote tables are updated on a table basis; check if the schema for
+       this table is actually present */
+    if (dbname[0] && (sqlite3FindTableCheckOnly(db, db->init.zTblName, db->aDb[i].zName) != 0)) continue;
+
     rc = sqlite3InitOne(db, i, pzErrMsg);
     if( rc ){
       sqlite3ResetOneSchema(db, i);
@@ -413,20 +460,53 @@ int sqlite3Init(sqlite3 *db, char **pzErrMsg){
   */
 #ifndef SQLITE_OMIT_TEMPDB
   assert( db->nDb>1 );
-  if( rc==SQLITE_OK && !DbHasProperty(db, 1, DB_SchemaLoaded) ){
+  /* COMDB2 MODIFICATION */
+  if( !zName && rc==SQLITE_OK && !DbHasProperty(db, 1, DB_SchemaLoaded) ){
     rc = sqlite3InitOne(db, 1, pzErrMsg);
     if( rc ){
       sqlite3ResetOneSchema(db, 1);
     }
   }
 #endif
-
+  /* COMDB2 MODIFICATION */
+  if( zName ){
+    free(db->init.zTblName);
+    db->init.zTblName = NULL;
+  }
   db->init.busy = 0;
   if( rc==SQLITE_OK && commit_internal ){
     sqlite3CommitInternalChanges(db);
   }
 
-  return rc; 
+  return rc;
+}
+
+/*
+** Initialize all database files - the main database file, the file
+** used to store temporary tables, and any additional database files
+** created using ATTACH statements.  Return a success code.  If an
+** error occurs, write an error message into *pzErrMsg.
+**
+** After a database is initialized, the DB_SchemaLoaded bit is set
+** bit is set in the flags field of the Db structure. If the database
+** file was of zero-length, then the DB_Empty flag is also set.
+*/
+int sqlite3Init(sqlite3 *db, char **pzErrMsg)
+{
+   int rc;
+
+#ifdef DEBUG_SQLITE_MEMORY
+   extern void sqlite_init_start(void);
+   sqlite_init_start();
+#endif
+
+   rc = sqlite3InitTable(db, pzErrMsg, NULL);
+
+#ifdef DEBUG_SQLITE_MEMORY
+   extern void sqlite_init_end(void);
+   sqlite_init_end();
+#endif
+   return rc;
 }
 
 /*
@@ -466,8 +546,21 @@ static void schemaIsValid(Parse *pParse){
     Btree *pBt = db->aDb[iDb].pBt;     /* Btree database to read cookie from */
     if( pBt==0 ) continue;
 
+/** COMDB2 MODIFICATION
+    sqlite3BtreeGetMeta is a memory only operation; we do not
+    need a transaction for it
+    call it w/out a transaction and hopefully prevent messing
+    up with the transactions
+*/
+    sqlite3BtreeGetMeta(pBt, BTREE_SCHEMA_VERSION, (u32 *)&cookie);
+    if( cookie!=db->aDb[iDb].pSchema->schema_cookie ){
+      pParse->rc = SQLITE_SCHEMA;
+    }
+
+#if 0
+    /* SEE COMDB2 MODIFICATION ABOVE */
     /* If there is not already a read-only (or read-write) transaction opened
-    ** on the b-tree database, open one now. If a transaction is opened, it 
+    ** on the b-tree database, open one now. If a transaction is opened, it
     ** will be closed immediately after reading the meta-value. */
     if( !sqlite3BtreeIsInReadTrans(pBt) ){
       rc = sqlite3BtreeBeginTrans(pBt, 0);
@@ -478,7 +571,7 @@ static void schemaIsValid(Parse *pParse){
       openedTransaction = 1;
     }
 
-    /* Read the schema cookie from the database. If it does not match the 
+    /* Read the schema cookie from the database. If it does not match the
     ** value stored as part of the in-memory schema representation,
     ** set Parse.rc to SQLITE_SCHEMA. */
     sqlite3BtreeGetMeta(pBt, BTREE_SCHEMA_VERSION, (u32 *)&cookie);
@@ -492,6 +585,7 @@ static void schemaIsValid(Parse *pParse){
     if( openedTransaction ){
       sqlite3BtreeCommit(pBt);
     }
+#endif
   }
 }
 
@@ -548,7 +642,9 @@ static int sqlite3Prepare(
   int saveSqlFlag,          /* True to copy SQL text into the sqlite3_stmt */
   Vdbe *pReprepare,         /* VM being reprepared */
   sqlite3_stmt **ppStmt,    /* OUT: A pointer to the prepared statement */
-  const char **pzTail       /* OUT: End of parsed string */
+  const char **pzTail,      /* OUT: End of parsed string */
+  /* COMDB2 MODIFICATION */
+  int flags
 ){
   Parse *pParse;            /* Parsing context */
   char *zErrMsg = 0;        /* Error message */
@@ -561,6 +657,11 @@ static int sqlite3Prepare(
     rc = SQLITE_NOMEM;
     goto end_prepare;
   }
+
+  /* COMDB2 MODIFICATION */
+  if (flags & SQLITE3_ENABLE_QUERY_PLAN)
+    pParse->enableExplainTrace = 1;
+
   pParse->pReprepare = pReprepare;
   assert( ppStmt && *ppStmt==0 );
   assert( !db->mallocFailed );
@@ -626,7 +727,7 @@ static int sqlite3Prepare(
       pParse->zTail = &zSql[nBytes];
     }
   }else{
-    sqlite3RunParser(pParse, zSql, &zErrMsg);
+    int ret = sqlite3RunParser(pParse, zSql, &zErrMsg);
   }
   assert( 0==pParse->nQueryLoop );
 
@@ -677,6 +778,11 @@ static int sqlite3Prepare(
     assert(!(*ppStmt));
   }else{
     *ppStmt = (sqlite3_stmt*)pParse->pVdbe;
+
+    /* COMDB2 MODIFICATION */
+    /* set time when the request is prepared, see now() function */
+    if( pParse->pVdbe )
+      clock_gettime(CLOCK_REALTIME, &pParse->pVdbe->tspec);
   }
 
   if( zErrMsg ){
@@ -701,6 +807,7 @@ end_prepare:
   assert( (rc&db->errMask)==rc );
   return rc;
 }
+
 static int sqlite3LockAndPrepare(
   sqlite3 *db,              /* Database handle. */
   const char *zSql,         /* UTF-8 encoded SQL statement. */
@@ -708,7 +815,9 @@ static int sqlite3LockAndPrepare(
   int saveSqlFlag,          /* True to copy SQL text into the sqlite3_stmt */
   Vdbe *pOld,               /* VM being reprepared */
   sqlite3_stmt **ppStmt,    /* OUT: A pointer to the prepared statement */
-  const char **pzTail       /* OUT: End of parsed string */
+  const char **pzTail,      /* OUT: End of parsed string */
+  /* COMDB2 MODIFICATION */
+  int flags
 ){
   int rc;
 
@@ -721,10 +830,12 @@ static int sqlite3LockAndPrepare(
   }
   sqlite3_mutex_enter(db->mutex);
   sqlite3BtreeEnterAll(db);
-  rc = sqlite3Prepare(db, zSql, nBytes, saveSqlFlag, pOld, ppStmt, pzTail);
+  /* COMDB2 MODIFICATION */
+  rc = sqlite3Prepare(db, zSql, nBytes, saveSqlFlag, pOld, ppStmt, pzTail, flags);
   if( rc==SQLITE_SCHEMA ){
     sqlite3_finalize(*ppStmt);
-    rc = sqlite3Prepare(db, zSql, nBytes, saveSqlFlag, pOld, ppStmt, pzTail);
+    /* COMDB2 MODIFICATION */
+    rc = sqlite3Prepare(db, zSql, nBytes, saveSqlFlag, pOld, ppStmt, pzTail, flags);
   }
   sqlite3BtreeLeaveAll(db);
   sqlite3_mutex_leave(db->mutex);
@@ -742,7 +853,7 @@ static int sqlite3LockAndPrepare(
 */
 int sqlite3Reprepare(Vdbe *p){
   int rc;
-  sqlite3_stmt *pNew;
+  Vdbe *pNew; /* COMDB2 */
   const char *zSql;
   sqlite3 *db;
 
@@ -751,7 +862,8 @@ int sqlite3Reprepare(Vdbe *p){
   assert( zSql!=0 );  /* Reprepare only called for prepare_v2() statements */
   db = sqlite3VdbeDb(p);
   assert( sqlite3_mutex_held(db->mutex) );
-  rc = sqlite3LockAndPrepare(db, zSql, -1, 0, p, &pNew, 0);
+  /* COMDB2 MODIFICATION */
+  rc = sqlite3LockAndPrepare(db, zSql, -1, 0, p, (sqlite3_stmt**) &pNew, 0, 0);
   if( rc ){
     if( rc==SQLITE_NOMEM ){
       db->mallocFailed = 1;
@@ -761,11 +873,59 @@ int sqlite3Reprepare(Vdbe *p){
   }else{
     assert( pNew!=0 );
   }
+
+  /* COMDB2 MODIFICATION */
+  /* Keep the previous state machine's tzname and misc comdb2 state. */
+
+#if 0
+    NOTE: sqlite3VdbeSwap takes care of preserving new updCols info !!!
+  memcpy(&pNew->updCols, &p->updCols, sizeof(Vdbe) - offsetof(Vdbe, updCols));
+  bzero(&p->updCols, sizeof(Vdbe) - offsetof(Vdbe, updCols));
+#endif
+  memcpy(pNew->tzname, p->tzname, TZNAME_MAX);
+
   sqlite3VdbeSwap((Vdbe*)pNew, p);
-  sqlite3TransferBindings(pNew, (sqlite3_stmt*)p);
+  sqlite3TransferBindings((sqlite3_stmt*)pNew, (sqlite3_stmt*)p);
   sqlite3VdbeResetStepResult((Vdbe*)pNew);
   sqlite3VdbeFinalize((Vdbe*)pNew);
   return SQLITE_OK;
+}
+
+/* COMDB2 MODIFICATION:TODO: AZ: not used */
+char* sqlite3_prepare_plan(sqlite3_stmt *stmt)
+{
+    if (stmt == NULL)
+      return NULL;
+    return ((Vdbe*) stmt)->explainTrace;
+}
+
+/* COMDB2 MODIFICATION */
+int sqlite3_prepare_flags(
+  sqlite3 *db,
+  const char *zSql,
+  int nBytes,
+  sqlite3_stmt **ppStmt,
+  const char** pzTail,
+  int flags);
+
+inline int sqlite3_prepare(
+  sqlite3 *db,              /* Database handle. */
+  const char *zSql,         /* UTF-8 encoded SQL statement. */
+  int nBytes,               /* Length of zSql in bytes. */
+  sqlite3_stmt **ppStmt,    /* OUT: A pointer to the prepared statement */
+  const char **pzTail       /* OUT: End of parsed string */
+){
+  return sqlite3_prepare_flags(db, zSql, nBytes, ppStmt, pzTail, 0);
+}
+
+inline int sqlite3_prepare_clone(
+  sqlite3 *db,              /* Database handle. */
+  const char *zSql,         /* UTF-8 encoded SQL statement. */
+  int nBytes,               /* Length of zSql in bytes. */
+  sqlite3_stmt **ppStmt,    /* OUT: A pointer to the prepared statement */
+  const char **pzTail       /* OUT: End of parsed string */
+){
+  return sqlite3_prepare_flags(db, zSql, nBytes, ppStmt, pzTail, 0);
 }
 
 
@@ -777,18 +937,23 @@ int sqlite3Reprepare(Vdbe *p){
 ** and the statement is automatically recompiled if an schema change
 ** occurs.
 */
-int sqlite3_prepare(
+/* COMDB2 MODIFICATION */
+int sqlite3_prepare_flags(
   sqlite3 *db,              /* Database handle. */
   const char *zSql,         /* UTF-8 encoded SQL statement. */
   int nBytes,               /* Length of zSql in bytes. */
   sqlite3_stmt **ppStmt,    /* OUT: A pointer to the prepared statement */
-  const char **pzTail       /* OUT: End of parsed string */
+  const char **pzTail,      /* OUT: End of parsed string */
+  /* COMDB2 MODIFICATION */
+  int flags
 ){
   int rc;
-  rc = sqlite3LockAndPrepare(db,zSql,nBytes,0,0,ppStmt,pzTail);
+  /* COMDB2 MODIFICATION */
+  rc = sqlite3LockAndPrepare(db,zSql,nBytes,0,0,ppStmt,pzTail,flags);
   assert( rc==SQLITE_OK || ppStmt==0 || *ppStmt==0 );  /* VERIFY: F13021 */
   return rc;
 }
+
 int sqlite3_prepare_v2(
   sqlite3 *db,              /* Database handle. */
   const char *zSql,         /* UTF-8 encoded SQL statement. */
@@ -797,7 +962,8 @@ int sqlite3_prepare_v2(
   const char **pzTail       /* OUT: End of parsed string */
 ){
   int rc;
-  rc = sqlite3LockAndPrepare(db,zSql,nBytes,1,0,ppStmt,pzTail);
+  /* COMDB2 MODIFICATION */
+  rc = sqlite3LockAndPrepare(db,zSql,nBytes,1,0,ppStmt,pzTail,0);
   assert( rc==SQLITE_OK || ppStmt==0 || *ppStmt==0 );  /* VERIFY: F13021 */
   return rc;
 }
@@ -808,7 +974,7 @@ int sqlite3_prepare_v2(
 ** Compile the UTF-16 encoded SQL statement zSql into a statement handle.
 */
 static int sqlite3Prepare16(
-  sqlite3 *db,              /* Database handle. */ 
+  sqlite3 *db,              /* Database handle. */
   const void *zSql,         /* UTF-16 encoded SQL statement. */
   int nBytes,               /* Length of zSql in bytes. */
   int saveSqlFlag,          /* True to save SQL text into the sqlite3_stmt */
@@ -839,7 +1005,8 @@ static int sqlite3Prepare16(
   sqlite3_mutex_enter(db->mutex);
   zSql8 = sqlite3Utf16to8(db, zSql, nBytes, SQLITE_UTF16NATIVE);
   if( zSql8 ){
-    rc = sqlite3LockAndPrepare(db, zSql8, -1, saveSqlFlag, 0, ppStmt, &zTail8);
+    /* COMDB2 MODIFICATION */
+    rc = sqlite3LockAndPrepare(db, zSql8, -1, saveSqlFlag, 0, ppStmt, &zTail8, 0);
   }
 
   if( zTail8 && pzTail ){
@@ -851,7 +1018,7 @@ static int sqlite3Prepare16(
     int chars_parsed = sqlite3Utf8CharLen(zSql8, (int)(zTail8-zSql8));
     *pzTail = (u8 *)zSql + sqlite3Utf16ByteLen(zSql, chars_parsed);
   }
-  sqlite3DbFree(db, zSql8); 
+  sqlite3DbFree(db, zSql8);
   rc = sqlite3ApiExit(db, rc);
   sqlite3_mutex_leave(db->mutex);
   return rc;
@@ -866,7 +1033,7 @@ static int sqlite3Prepare16(
 ** occurs.
 */
 int sqlite3_prepare16(
-  sqlite3 *db,              /* Database handle. */ 
+  sqlite3 *db,              /* Database handle. */
   const void *zSql,         /* UTF-16 encoded SQL statement. */
   int nBytes,               /* Length of zSql in bytes. */
   sqlite3_stmt **ppStmt,    /* OUT: A pointer to the prepared statement */
@@ -878,7 +1045,7 @@ int sqlite3_prepare16(
   return rc;
 }
 int sqlite3_prepare16_v2(
-  sqlite3 *db,              /* Database handle. */ 
+  sqlite3 *db,              /* Database handle. */
   const void *zSql,         /* UTF-16 encoded SQL statement. */
   int nBytes,               /* Length of zSql in bytes. */
   sqlite3_stmt **ppStmt,    /* OUT: A pointer to the prepared statement */

@@ -17,6 +17,11 @@
 #include <stdlib.h>
 #include <assert.h>
 #include "vdbeInt.h"
+#include <unistd.h>
+
+#include <memcompare.c>
+
+extern const char * const gbl_db_release_name;
 
 /*
 ** Return the collating function associated with a function.
@@ -83,6 +88,14 @@ static void typeofFunc(
     case SQLITE_TEXT:    z = "text";    break;
     case SQLITE_FLOAT:   z = "real";    break;
     case SQLITE_BLOB:    z = "blob";    break;
+    /* COMDB2 MODIFICATION */
+    case SQLITE_DATETIMEUS:
+    case SQLITE_DATETIME:       z = "datetime";    break;
+    case SQLITE_INTERVAL_YM:    z = "interval_ym"; break;
+    case SQLITE_INTERVAL_DSUS:
+    case SQLITE_INTERVAL_DS:    z = "interval_ds"; break;
+    case SQLITE_DECIMAL:        z = "decimal";     break;
+
     default:             z = "null";    break;
   }
   sqlite3_result_text(context, z, -1, SQLITE_STATIC);
@@ -102,6 +115,14 @@ static void lengthFunc(
   assert( argc==1 );
   UNUSED_PARAMETER(argc);
   switch( sqlite3_value_type(argv[0]) ){
+    /* COMDB2 MODIFICATION */
+    case SQLITE_INTERVAL_YM:
+    case SQLITE_INTERVAL_DS:
+    case SQLITE_INTERVAL_DSUS:
+    case SQLITE_DATETIME:
+    case SQLITE_DATETIMEUS:
+    case SQLITE_DECIMAL:
+
     case SQLITE_BLOB:
     case SQLITE_INTEGER:
     case SQLITE_FLOAT: {
@@ -154,6 +175,26 @@ static void absFunc(sqlite3_context *context, int argc, sqlite3_value **argv){
     case SQLITE_NULL: {
       /* IMP: R-37434-19929 Abs(X) returns NULL if X is NULL. */
       sqlite3_result_null(context);
+      break;
+    }
+    case SQLITE_DECIMAL: {
+      decContext ctx;
+      intv_t *val = (intv_t*)sqlite3_value_interval( argv[0], SQLITE_DECIMAL);
+      intv_t res_val;
+
+      dec_ctx_init(&ctx, DEC_INIT_DECQUAD, gbl_decimal_rounding);
+
+      decQuadAbs( &res_val.u.dec, &val->u.dec, &ctx);
+      if(dfp_conv_check_status( &ctx, "quad", "abs(quad)"))
+      {
+          sqlite3_result_error(context, "decimal overflow", -1);
+          break;
+      }
+
+      res_val.type = INTV_DECIMAL_TYPE;
+      res_val.sign = 0;
+
+      sqlite3_result_interval(context, &res_val);
       break;
     }
     default: {
@@ -278,6 +319,11 @@ static void substrFunc(
   }
   p0type = sqlite3_value_type(argv[0]);
   p1 = sqlite3_value_int(argv[1]);
+
+  /* COMDB2 MODIFICATION
+   * DRQS 22394086 */
+  if (p1 == 0) p1 = 1;
+
   if( p0type==SQLITE_BLOB ){
     len = sqlite3_value_bytes(argv[0]);
     z = sqlite3_value_blob(argv[0]);
@@ -347,6 +393,26 @@ static void substrFunc(
     }
     sqlite3_result_blob64(context, (char*)&z[p1], (u64)p2, SQLITE_TRANSIENT);
   }
+}
+
+/* COMDB2 MODIFICATION */
+/*
+** Implementation of the sleep() function
+*/
+static void sleepFunc(sqlite3_context *context, int argc, sqlite3_value *argv[]) {
+  int n;
+  int rc;
+  if( argc != 1 ){
+    sqlite3_result_int(context, -1);
+    return;
+  }
+  n = sqlite3_value_int(argv[0]);
+  if( n < 0 ){
+    sqlite3_result_int(context, -1);
+    return;
+  }
+  rc = sleep(n);
+  sqlite3_result_int(context, n);
 }
 
 /*
@@ -510,6 +576,124 @@ static void randomBlob(
   if( p ){
     sqlite3_randomness(n, p);
     sqlite3_result_blob(context, (char*)p, n, sqlite3_free);
+  }
+}
+
+
+/*
+** Implementation of the comdb2_version() SQL function.  The return
+** value is the same as the stat value for version
+*/
+static void comdb2VersionFunc(
+  sqlite3_context *context, 
+  int NotUsed, 
+  sqlite3_value **NotUsed2
+){
+  UNUSED_PARAMETER2(NotUsed, NotUsed2);
+  char zBuf[50];
+  const char * version = getenv("COMDB2_VERSION");
+  sqlite3_snprintf(sizeof(zBuf), zBuf, "%s (%s)", gbl_db_release_name, version);
+  sqlite3_result_text(context, zBuf, -1, SQLITE_TRANSIENT);
+}
+
+extern char * comdb2_get_prev_query_cost();
+extern char * comdb2_free_prev_query_cost();
+
+static void comdb2PrevquerycostFunc(
+  sqlite3_context *context, 
+  int NotUsed, 
+  sqlite3_value **NotUsed2
+){
+  UNUSED_PARAMETER2(NotUsed, NotUsed2);
+  char * cost = comdb2_get_prev_query_cost();
+  if(cost) {
+      sqlite3_result_text(context, cost, -1, SQLITE_TRANSIENT);
+      comdb2_free_prev_query_cost();
+  }
+}
+
+
+/* TODO: HOSTNAME may not be set... */
+static void comdb2HostFunc(
+  sqlite3_context *context, 
+  int NotUsed, 
+  sqlite3_value **NotUsed2
+){
+  UNUSED_PARAMETER2(NotUsed, NotUsed2);
+  char zBuf[50];
+  const char * node = getenv("HOSTNAME");
+  sqlite3_snprintf(sizeof(zBuf), zBuf, "%s", node);
+  sqlite3_result_text(context, zBuf, -1, SQLITE_TRANSIENT);
+}
+
+/* COMDB2 MODIFICATIONS */
+extern unsigned long long comdb2_table_version(const char *tablename);
+/*
+** Implementation of the table_version() SQL function.  This returns
+** the comdb2 table version
+*/
+static void tableVersionFunc(
+  sqlite3_context *context, 
+  int argc, 
+  sqlite3_value **argv
+){
+  const char *tablename;
+  sqlite_int64 version;
+
+  assert(argc==1);
+  if(sqlite3_value_type(argv[0]) != SQLITE_TEXT) {
+    return;
+  }
+  
+  tablename = sqlite3_value_text(argv[0]);
+
+  version = comdb2_table_version(tablename);
+  if (version<0) {
+    return;
+  }
+  
+  sqlite3_result_int64(context, version);
+}
+
+/* COMDB2 MODIFICATIONS */
+extern char* comdb2_partition_info(const char *partition, const char *option);
+/*
+** Implementation of the table_version() SQL function.  This returns
+** the comdb2 table version
+*/
+static void partitionInfoFunc(
+  sqlite3_context *context, 
+  int argc, 
+  sqlite3_value **argv
+){
+  sqlite3      *db = sqlite3_context_db_handle(context);
+  const char   *partition_name;
+  const char   *option;
+  char         *info;
+
+  assert(argc==2);
+  if(sqlite3_value_type(argv[0]) != SQLITE_TEXT) {
+    return;
+  }
+  partition_name = sqlite3_value_text(argv[0]);
+  
+  if(sqlite3_value_type(argv[1]) != SQLITE_TEXT) {
+    return;
+  }
+  option = sqlite3_value_text(argv[1]);
+
+  info = comdb2_partition_info(partition_name, option);
+
+  if(!info)
+  {
+    sqlite3_result_null(context);
+  }
+  else
+  {
+    sqlite3_result_text(context, info, -1, SQLITE_TRANSIENT);
+
+    if(info)
+      free(info);
   }
 }
 
@@ -798,6 +982,17 @@ static void likeFunc(
   int nPat;
   sqlite3 *db = sqlite3_context_db_handle(context);
 
+#ifdef SQLITE_LIKE_DOESNT_MATCH_BLOBS
+  if( sqlite3_value_type(argv[0])==SQLITE_BLOB
+   || sqlite3_value_type(argv[1])==SQLITE_BLOB
+  ){
+#ifdef SQLITE_TEST
+    sqlite3_like_count++;
+#endif
+    sqlite3_result_int(context, 0);
+    return;
+  }
+#endif
   zB = sqlite3_value_text(argv[0]);
   zA = sqlite3_value_text(argv[1]);
 
@@ -1403,6 +1598,8 @@ struct SumCtx {
   i64 cnt;          /* Number of elements summed */
   u8 overflow;      /* True if integer overflow seen */
   u8 approx;        /* True if non-integer value was input to the sum */
+  u8 decs;          /* True if summing decimals */
+  decQuad decSum;   /* decQuad aggregation */
 };
 
 /*
@@ -1430,6 +1627,54 @@ static void sumStep(sqlite3_context *context, int argc, sqlite3_value **argv){
       if( (p->approx|p->overflow)==0 && sqlite3AddInt64(&p->iSum, v) ){
         p->overflow = 1;
       }
+    }else if( type==SQLITE_DECIMAL){
+       intv_t v = *(intv_t*)sqlite3_value_interval(argv[0], SQLITE_DECIMAL);
+
+       if (p->decs == 0)
+       {
+          p->decSum = v.u.dec;
+          p->decs = 1;
+
+          if(0) {
+             char aaa[128];
+             char bbb[128];
+
+             decQuadToString( &p->decSum, aaa);
+             decQuadToString( &v.u.dec, bbb);
+
+             fprintf(stderr, "%s  = %s\n",
+                   aaa, bbb);
+          }
+       }
+       else
+       {
+          decContext ctx;
+          decQuad    res;
+       
+          dec_ctx_init( &ctx, DEC_INIT_DECQUAD, gbl_decimal_rounding);
+          decQuadAdd( &res, &p->decSum, &v.u.dec, &ctx);
+
+          if (dfp_conv_check_status(&ctx, "quad", "add(quads)"))
+          {
+             sqlite3_result_error(context, "decimal overflow", -1);
+          }
+
+          if(0){
+             char aaa[128];
+             char bbb[128];
+             char ccc[128];
+
+             decQuadToString( &p->decSum, aaa);
+             decQuadToString( &v.u.dec, bbb);
+             decQuadToString( &res, ccc);
+
+             fprintf(stderr, "%s + %s = %s\n",
+                   aaa, bbb, ccc);
+          }
+
+          p->decSum = res;
+       }
+
     }else{
       p->rSum += sqlite3_value_double(argv[0]);
       p->approx = 1;
@@ -1444,6 +1689,12 @@ static void sumFinalize(sqlite3_context *context){
       sqlite3_result_error(context,"integer overflow",-1);
     }else if( p->approx ){
       sqlite3_result_double(context, p->rSum);
+    }else if( p->decs){
+       intv_t res;
+       res.type = INTV_DECIMAL_TYPE;
+       res.sign = 0;
+       res.u.dec = p->decSum;
+       sqlite3_result_interval(context, &res);
     }else{
       sqlite3_result_int64(context, p->iSum);
     }
@@ -1453,14 +1704,45 @@ static void avgFinalize(sqlite3_context *context){
   SumCtx *p;
   p = sqlite3_aggregate_context(context, 0);
   if( p && p->cnt>0 ){
-    sqlite3_result_double(context, p->rSum/(double)p->cnt);
+     if( p->decs)
+     {
+        decContext ctx;
+        decQuad denom;
+        decQuad res;
+        intv_t  tv;
+
+        dec_ctx_init( &ctx, DEC_INIT_DECQUAD, gbl_decimal_rounding);
+        decQuadFromInt32( &denom, p->cnt);
+        decQuadDivide( &res, &p->decSum, &denom, &ctx);
+        if (dfp_conv_check_status(&ctx, "quad", "divide(quad)"))
+        {
+           sqlite3_result_error(context, "decimal overflow", -1);
+        }
+
+        tv.type = INTV_DECIMAL_TYPE;
+        tv.sign = 0;
+        tv.u.dec = res;
+
+        sqlite3_result_interval( context, &tv);
+     }
+     else
+        sqlite3_result_double(context, p->rSum/(double)p->cnt);
   }
 }
 static void totalFinalize(sqlite3_context *context){
   SumCtx *p;
   p = sqlite3_aggregate_context(context, 0);
   /* (double)0 In case of SQLITE_OMIT_FLOATING_POINT... */
-  sqlite3_result_double(context, p ? p->rSum : (double)0);
+  if (p && p->decs)
+  {
+     intv_t res;
+     res.type = INTV_DECIMAL_TYPE;
+     res.sign = 0;
+     res.u.dec = p->decSum;
+     sqlite3_result_interval(context, &res);
+  }
+  else
+     sqlite3_result_double(context, p ? p->rSum : (double)0);
 }
 
 /*
@@ -1721,6 +2003,7 @@ void sqlite3RegisterGlobalFunctions(void){
     FUNCTION2(length,            1, 0, 0, lengthFunc,  SQLITE_FUNC_LENGTH),
     FUNCTION(instr,              2, 0, 0, instrFunc        ),
     FUNCTION(substr,             2, 0, 0, substrFunc       ),
+    FUNCTION(sleep,              1, 0, 0, sleepFunc        ),
     FUNCTION(substr,             3, 0, 0, substrFunc       ),
     FUNCTION(printf,            -1, 0, 0, printfFunc       ),
     FUNCTION(unicode,            1, 0, 0, unicodeFunc      ),
@@ -1754,7 +2037,9 @@ void sqlite3RegisterGlobalFunctions(void){
     FUNCTION(sqlite_compileoption_get, 1, 0, 0, compileoptiongetFunc  ),
 #endif /* SQLITE_OMIT_COMPILEOPTION_DIAGS */
     FUNCTION(quote,              1, 0, 0, quoteFunc        ),
+#ifndef SQLITE_BUILDING_FOR_COMDB2
     VFUNCTION(last_insert_rowid, 0, 0, 0, last_insert_rowid),
+#endif
     VFUNCTION(changes,           0, 0, 0, changes          ),
     VFUNCTION(total_changes,     0, 0, 0, total_changes    ),
     FUNCTION(replace,            3, 0, 0, replaceFunc      ),
@@ -1783,6 +2068,13 @@ void sqlite3RegisterGlobalFunctions(void){
     LIKEFUNC(like, 2, &likeInfoNorm, SQLITE_FUNC_LIKE),
     LIKEFUNC(like, 3, &likeInfoNorm, SQLITE_FUNC_LIKE),
   #endif
+#ifdef SQLITE_BUILDING_FOR_COMDB2
+    FUNCTION(comdb2_version,    0, 0, 0, comdb2VersionFunc),
+    FUNCTION(table_version,     1, 0, 0, tableVersionFunc),
+    FUNCTION(partition_info,     2, 0, 0, partitionInfoFunc),
+    FUNCTION(comdb2_host,    0, 0, 0,     comdb2HostFunc),
+    FUNCTION(comdb2_prevquerycost,    0, 0, 0, comdb2PrevquerycostFunc)
+#endif
   };
 
   int i;

@@ -62,7 +62,7 @@
 ** of the file.
 */
 #ifndef SQLITE_TEMP_FILE_PREFIX
-# define SQLITE_TEMP_FILE_PREFIX "etilqs_"
+# define SQLITE_TEMP_FILE_PREFIX "sqlsort_"
 #endif
 
 /*

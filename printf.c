@@ -1045,6 +1045,9 @@ void sqlite3_log(int iErrCode, const char *zFormat, ...){
   }
 }
 
+/* COMDB2 MODIFICATION */
+/* Use the one in io_override */
+#if 0
 #if defined(SQLITE_DEBUG)
 /*
 ** A version of printf() that understands %lld.  Used for debugging.
@@ -1066,7 +1069,8 @@ void sqlite3DebugPrintf(const char *zFormat, ...){
 }
 #endif
 
-#ifdef SQLITE_DEBUG
+#endif
+#ifdef SQLITE_BUILDING_FOR_COMDB2
 /*************************************************************************
 ** Routines for implementing the "TreeView" display of hierarchical
 ** data structures for debugging.

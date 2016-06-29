@@ -137,6 +137,9 @@
 */
 #include "sqliteInt.h"
 #include "vdbeInt.h"
+#include <sys/types.h>
+#include <inttypes.h>
+#include <cheapstack.h>
 
 /* 
 ** If SQLITE_DEBUG_SORTER_THREADS is defined, this module outputs various
@@ -157,15 +160,10 @@
 /*
 ** Private objects used by the sorter
 */
-typedef struct MergeEngine MergeEngine;     /* Merge PMAs together */
-typedef struct PmaReader PmaReader;         /* Incrementally read one PMA */
 typedef struct PmaWriter PmaWriter;         /* Incrementally write one PMA */
-typedef struct SorterRecord SorterRecord;   /* A record being sorted */
-typedef struct SortSubtask SortSubtask;     /* A sub-task in the sort process */
-typedef struct SorterFile SorterFile;       /* Temporary file object wrapper */
-typedef struct SorterList SorterList;       /* In-memory list of records */
 typedef struct IncrMerger IncrMerger;       /* Read & merge multiple PMAs */
 
+#ifndef  SQLITE_BUILDING_FOR_COMDB2
 /*
 ** A container for a temp file handle and the current amount of data 
 ** stored in the file.
@@ -188,6 +186,7 @@ struct SorterList {
   u8 *aMemory;                    /* If non-NULL, bulk memory to hold pList */
   int szPMA;                      /* Size of pList as PMA in bytes */
 };
+#endif
 
 /*
 ** The MergeEngine object is used to combine two or more smaller PMAs into
@@ -260,6 +259,7 @@ struct MergeEngine {
   PmaReader *aReadr;         /* Array of PmaReaders to merge data from */
 };
 
+#ifndef  SQLITE_BUILDING_FOR_COMDB2
 /*
 ** This object represents a single thread of control in a sort operation.
 ** Exactly VdbeSorter.nTask instances of this object are allocated
@@ -302,6 +302,7 @@ struct SortSubtask {
   SorterFile file2;               /* Space for other PMAs */
 };
 
+
 /*
 ** Main sorter structure. A single instance of this is allocated for each 
 ** sorter cursor created by the VDBE.
@@ -329,7 +330,14 @@ struct VdbeSorter {
   u8 iPrev;                       /* Previous thread used to flush PMA */
   u8 nTask;                       /* Size of aTask[] array */
   SortSubtask aTask[1];           /* One or more subtasks */
+
+  /* COMDB2 MODIFICATION */
+  int nfind;
+  int nmove;
+  int nwrite;
 };
+
+#endif
 
 /*
 ** An instance of the following object is used to read records out of a
@@ -663,6 +671,8 @@ static int vdbePmaReaderSeek(
   return rc;
 }
 
+#include <vdbecompare.c>
+
 /*
 ** Advance PmaReader pReadr to the next key in its PMA. Return SQLITE_OK if
 ** no error occurs, or an SQLite error code if one does.
@@ -768,6 +778,8 @@ static int vdbeSorterCompare(
   return sqlite3VdbeRecordCompare(nKey1, pKey1, r2);
 }
 
+extern int gbl_sqlite_sorter_mem;
+
 /*
 ** Initialize the temporary index cursor just opened as a sorter cursor.
 **
@@ -832,6 +844,11 @@ int sqlite3VdbeSorterInit(
   if( pSorter==0 ){
     rc = SQLITE_NOMEM;
   }else{
+    /* COMDB2 MODIFICATION */
+    pSorter->nfind = 0;
+    pSorter->nmove = 0;
+    pSorter->nwrite = 0;
+ 
     pSorter->pKeyInfo = pKeyInfo = (KeyInfo*)((u8*)pSorter + sz);
     memcpy(pKeyInfo, pCsr->pKeyInfo, szKeyInfo);
     pKeyInfo->db = 0;
@@ -848,9 +865,12 @@ int sqlite3VdbeSorterInit(
     if( !sqlite3TempInMemory(db) ){
       u32 szPma = sqlite3GlobalConfig.szPma;
       pSorter->mnPmaSize = szPma * pgsz;
+      /* COMDB2 MODIFICATION
       mxCache = db->aDb[0].pSchema->cache_size;
       if( mxCache<(int)szPma ) mxCache = (int)szPma;
       pSorter->mxPmaSize = MIN((i64)mxCache*pgsz, SQLITE_MAX_PMASZ);
+      */
+      pSorter->mxPmaSize = gbl_sqlite_sorter_mem;
 
       /* EVIDENCE-OF: R-26747-61719 When the application provides any amount of
       ** scratch memory using SQLITE_CONFIG_SCRATCH, SQLite avoids unnecessary
@@ -880,6 +900,11 @@ static void vdbeSorterRecordFree(sqlite3 *db, SorterRecord *pRecord){
     sqlite3DbFree(db, p);
   }
 }
+
+/* COMDB2 MODIFICATION */
+/* forward declarations */
+void addVbdeSorterCost(const VdbeSorter *pCsr);
+void addVbdeToThdCost(int type);
 
 /*
 ** Free all resources owned by the object indicated by argument pTask. All 
@@ -1109,6 +1134,9 @@ void sqlite3VdbeSorterReset(sqlite3 *db, VdbeSorter *pSorter){
 void sqlite3VdbeSorterClose(sqlite3 *db, VdbeCursor *pCsr){
   VdbeSorter *pSorter = pCsr->pSorter;
   if( pSorter ){
+    /* COMDB2 MODIFICATION */
+    addVbdeSorterCost(pSorter);
+
     sqlite3VdbeSorterReset(db, pSorter);
     sqlite3_free(pSorter->list.aMemory);
     sqlite3DbFree(db, pSorter);
@@ -1604,6 +1632,10 @@ int sqlite3VdbeSorterWrite(
   int nPMA;                       /* Bytes of PMA space required */
 
   assert( pSorter );
+  /* COMDB2 MODIFICATION */
+  addVbdeToThdCost(VDBESORTER_WRITE);
+  pSorter->nwrite++;
+
 
   /* Figure out whether or not the current contents of memory should be
   ** flushed to a PMA before continuing. If so, do so.
@@ -1792,6 +1824,7 @@ static int vdbeIncrSwap(IncrMerger *pIncr){
       pIncr->bEof = 1;
     }
   }
+  
 
   return rc;
 }
@@ -2359,6 +2392,9 @@ int sqlite3VdbeSorterRewind(const VdbeCursor *pCsr, int *pbEof){
 
   assert( pSorter );
 
+  /* COMDB2 MODIFICATION */
+  pSorter->nfind++;
+
   /* If no data has been written to disk, then do not do so now. Instead,
   ** sort the VdbeSorter.pRecord list. The vdbe layer will read data directly
   ** from the in-memory list.  */
@@ -2402,6 +2438,10 @@ int sqlite3VdbeSorterRewind(const VdbeCursor *pCsr, int *pbEof){
 int sqlite3VdbeSorterNext(sqlite3 *db, const VdbeCursor *pCsr, int *pbEof){
   VdbeSorter *pSorter = pCsr->pSorter;
   int rc;                         /* Return code */
+
+  /* COMDB2 MODIFICATION */
+  addVbdeToThdCost(VDBESORTER_MOVE);
+  pSorter->nmove++;
 
   assert( pSorter->bUsePMA || (pSorter->pReader==0 && pSorter->pMerger==0) );
   if( pSorter->bUsePMA ){

@@ -36,6 +36,15 @@ void sqlite3OpenTable(
   assert( opcode==OP_OpenWrite || opcode==OP_OpenRead );
   sqlite3TableLock(pParse, iDb, pTab->tnum, 
                    (opcode==OP_OpenWrite)?1:0, pTab->zName);
+  /* COMDB2 MODIFICATION */
+  /* if we are handling a SELECTV, we generate a new opcode so that we 
+     know to open recording BtCursors at runtime
+  */
+  /* TODO: AZ: is this opcode ok for both parts of the if below? */
+  if( GET_CURSOR_RECORDING(pParse, iCur) ){
+    opcode = OP_OpenRead_Record;
+  }
+
   if( HasRowid(pTab) ){
     sqlite3VdbeAddOp4Int(v, opcode, iCur, pTab->tnum, iDb, pTab->nCol);
     VdbeComment((v, "%s", pTab->zName));
@@ -47,6 +56,11 @@ void sqlite3OpenTable(
     sqlite3VdbeSetP4KeyInfo(pParse, pPk);
     VdbeComment((v, "%s", pTab->zName));
   }
+
+  /* COMDB2: Open Cursor locks the table, verify cookie after we have opened the cursor */
+  if (iDb != 1)
+      sqlite3VdbeAddTable(v,pTab);
+
 }
 
 /*
@@ -720,10 +734,8 @@ void sqlite3Insert(
   /* Make sure the number of columns in the source data matches the number
   ** of columns to be inserted into the table.
   */
-  if( IsVirtual(pTab) ){
-    for(i=0; i<pTab->nCol; i++){
-      nHidden += (IsHiddenColumn(&pTab->aCol[i]) ? 1 : 0);
-    }
+  for(i=0; i<pTab->nCol; i++){
+    nHidden += (IsHiddenColumn(&pTab->aCol[i]) ? 1 : 0);
   }
   if( pColumn==0 && nColumn && nColumn!=(pTab->nCol-nHidden) ){
     sqlite3ErrorMsg(pParse, 
@@ -746,7 +758,7 @@ void sqlite3Insert(
   /* If this is not a view, open the table and and all indices */
   if( !isView ){
     int nIdx;
-    nIdx = sqlite3OpenTableAndIndices(pParse, pTab, OP_OpenWrite, -1, 0,
+    nIdx = sqlite3OpenTableAndIndices(pParse, pTab, OP_OpenWrite, 0, -1, 0,
                                       &iDataCur, &iIdxCur);
     aRegIdx = sqlite3DbMallocRaw(db, sizeof(int)*(nIdx+1));
     if( aRegIdx==0 ){
@@ -819,15 +831,14 @@ void sqlite3Insert(
 
     /* Create the new column data
     */
-    for(i=0; i<pTab->nCol; i++){
-      if( pColumn==0 ){
-        j = i;
-      }else{
+    for(i=j=0; i<pTab->nCol; i++){
+      if( pColumn){
         for(j=0; j<pColumn->nId; j++){
           if( pColumn->a[j].idx==i ) break;
         }
       }
-      if( (!useTempTable && !pList) || (pColumn && j>=pColumn->nId) ){
+      if( (!useTempTable && !pList) || (pColumn && j>=pColumn->nId) 
+            || (pColumn==0 && IsOrdinaryHiddenColumn(&pTab->aCol[i])) ){
         sqlite3ExprCode(pParse, pTab->aCol[i].pDflt, regCols+i+1);
       }else if( useTempTable ){
         sqlite3VdbeAddOp3(v, OP_Column, srcTab, j, regCols+i+1); 
@@ -835,6 +846,7 @@ void sqlite3Insert(
         assert( pSelect==0 ); /* Otherwise useTempTable is true */
         sqlite3ExprCodeAndCache(pParse, pList->a[j].pExpr, regCols+i+1);
       }
+      if( pColumn==0 && !IsOrdinaryHiddenColumn(&pTab->aCol[i]) ) j++;      
     }
 
     /* If this is an INSERT on a view with an INSTEAD OF INSERT trigger,
@@ -918,7 +930,6 @@ void sqlite3Insert(
       }
       if( pColumn==0 ){
         if( IsHiddenColumn(&pTab->aCol[i]) ){
-          assert( IsVirtual(pTab) );
           j = -1;
           nHidden++;
         }else{
@@ -955,7 +966,7 @@ void sqlite3Insert(
     }else
 #endif
     {
-      int isReplace;    /* Set to true if constraints may cause a replace */
+      int isReplace = 0;    /* Set to true if constraints may cause a replace */
       sqlite3GenerateConstraintChecks(pParse, pTab, aRegIdx, iDataCur, iIdxCur,
           regIns, 0, ipkColumn>=0, onError, endOfLoop, &isReplace
       );
@@ -993,9 +1004,12 @@ void sqlite3Insert(
   if( !IsVirtual(pTab) && !isView ){
     /* Close all tables opened */
     if( iDataCur<iIdxCur ) sqlite3VdbeAddOp1(v, OP_Close, iDataCur);
+    /* COMDB2 MODIFICATION */
+#if 0
     for(idx=0, pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext, idx++){
       sqlite3VdbeAddOp1(v, OP_Close, idx+iIdxCur);
     }
+#endif
   }
 
 insert_end:
@@ -1135,6 +1149,8 @@ void sqlite3GenerateConstraintChecks(
   int ignoreDest,      /* Jump to this label on an OE_Ignore resolution */
   int *pbMayReplace    /* OUT: Set to true if constraint may cause a replace */
 ){
+  /* COMDB2 MODIFICATION */
+#if 0
   Vdbe *v;             /* VDBE under constrution */
   Index *pIdx;         /* Pointer to one of the indices */
   Index *pPk = 0;      /* The PRIMARY KEY index */
@@ -1177,6 +1193,8 @@ void sqlite3GenerateConstraintChecks(
 
   /* Test all NOT NULL constraints.
   */
+ 
+  /* from now on, stop checking for null constraints while sql */
   for(i=0; i<nCol; i++){
     if( i==pTab->iPKey ){
       continue;
@@ -1331,10 +1349,10 @@ void sqlite3GenerateConstraintChecks(
         if( pTrigger || sqlite3FkRequired(pParse, pTab, 0, 0) ){
           sqlite3MultiWrite(pParse);
           sqlite3GenerateRowDelete(pParse, pTab, pTrigger, iDataCur, iIdxCur,
-                                   regNewData, 1, 0, OE_Replace, 1);
+                                   regNewData, 1, 0, OE_Replace, ONEPASS_SINGLE, -1);
         }else if( pTab->pIndex ){
           sqlite3MultiWrite(pParse);
-          sqlite3GenerateRowIndexDelete(pParse, pTab, iDataCur, iIdxCur, 0);
+          sqlite3GenerateRowIndexDelete(pParse, pTab, iDataCur, iIdxCur, 0, -1);
         }
         seenReplace = 1;
         break;
@@ -1505,7 +1523,8 @@ void sqlite3GenerateConstraintChecks(
           pTrigger = sqlite3TriggersExist(pParse, pTab, TK_DELETE, 0, 0);
         }
         sqlite3GenerateRowDelete(pParse, pTab, pTrigger, iDataCur, iIdxCur,
-                                 regR, nPkField, 0, OE_Replace, pIdx==pPk);
+              regR, nPkField, 0, OE_Replace, 
+              (pIdx==pPk ? ONEPASS_SINGLE : ONEPASS_OFF), -1);
         seenReplace = 1;
         break;
       }
@@ -1521,6 +1540,7 @@ void sqlite3GenerateConstraintChecks(
   
   *pbMayReplace = seenReplace;
   VdbeModuleComment((v, "END: GenCnstCks(%d)", seenReplace));
+#endif
 }
 
 /*
@@ -1554,6 +1574,8 @@ void sqlite3CompleteInsertion(
   v = sqlite3GetVdbe(pParse);
   assert( v!=0 );
   assert( pTab->pSelect==0 );  /* This table is not a VIEW */
+  /* COMDB2 MODIFICATION */
+  #if 0
   for(i=0, pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext, i++){
     if( aRegIdx[i]==0 ) continue;
     bAffinityDone = 1;
@@ -1570,6 +1592,7 @@ void sqlite3CompleteInsertion(
     }
     if( pik_flags )  sqlite3VdbeChangeP5(v, pik_flags);
   }
+  #endif
   if( !HasRowid(pTab) ) return;
   regData = regNewData + 1;
   regRec = sqlite3GetTempReg(pParse);
@@ -1620,6 +1643,7 @@ int sqlite3OpenTableAndIndices(
   Parse *pParse,   /* Parsing context */
   Table *pTab,     /* Table to be opened */
   int op,          /* OP_OpenRead or OP_OpenWrite */
+  u8 p5,           /* P5 value for OP_Open* opcodes (except on WITHOUT ROWID) */
   int iBase,       /* Use this for the table cursor, if there is one */
   u8 *aToOpen,     /* If not NULL: boolean for each table and index */
   int *piDataCur,  /* Write the database source cursor number here */
@@ -1632,6 +1656,7 @@ int sqlite3OpenTableAndIndices(
   Vdbe *v;
 
   assert( op==OP_OpenRead || op==OP_OpenWrite );
+  assert( op==OP_OpenWrite || p5==0 );
   if( IsVirtual(pTab) ){
     /* This routine is a no-op for virtual tables. Leave the output
     ** variables *piDataCur and *piIdxCur uninitialized so that valgrind
@@ -1650,6 +1675,24 @@ int sqlite3OpenTableAndIndices(
     sqlite3TableLock(pParse, iDb, pTab->tnum, op==OP_OpenWrite, pTab->zName);
   }
   if( piIdxCur ) *piIdxCur = iBase;
+
+  for(i=0, pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext, i++){
+    int iIdxCur = iBase++;
+    assert( pIdx->pSchema==pTab->pSchema );
+    if( aToOpen==0 || aToOpen[i+1] ){
+      sqlite3VdbeAddOp3(v, op, iIdxCur, pIdx->tnum, iDb);
+      sqlite3VdbeSetP4KeyInfo(pParse, pIdx);
+
+      VdbeComment((v, "%s", pIdx->zName));
+    }
+    if( IsPrimaryKeyIndex(pIdx) && !HasRowid(pTab) ){
+      if( piDataCur ) *piDataCur = iIdxCur;
+    }else{
+      sqlite3VdbeChangeP5(v, p5);
+    }
+  }
+#if 0
+  /* COMDB2 MODIFICATION */
   for(i=0, pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext, i++){
     int iIdxCur = iBase++;
     assert( pIdx->pSchema==pTab->pSchema );
@@ -1659,9 +1702,14 @@ int sqlite3OpenTableAndIndices(
     if( aToOpen==0 || aToOpen[i+1] ){
       sqlite3VdbeAddOp3(v, op, iIdxCur, pIdx->tnum, iDb);
       sqlite3VdbeSetP4KeyInfo(pParse, pIdx);
+      sqlite3VdbeChangeP5(v, p5);
       VdbeComment((v, "%s", pIdx->zName));
     }
   }
+/*#else*/
+  i = 0;
+#endif
+
   if( iBase>pParse->nTab ) pParse->nTab = iBase;
   return i;
 }
@@ -1835,7 +1883,7 @@ static int xferOptimization(
     return 0;   /* The result set must have exactly one column */
   }
   assert( pEList->a[0].pExpr );
-  if( pEList->a[0].pExpr->op!=TK_ALL ){
+  if( pEList->a[0].pExpr->op!=TK_ASTERISK ){
     return 0;   /* The result set must be the special operator "*" */
   }
 
@@ -1871,6 +1919,13 @@ static int xferOptimization(
   for(i=0; i<pDest->nCol; i++){
     Column *pDestCol = &pDest->aCol[i];
     Column *pSrcCol = &pSrc->aCol[i];
+#ifdef SQLITE_ENABLE_HIDDEN_COLUMNS
+    if( (db->flags & SQLITE_Vacuum)==0 
+     && (pDestCol->colFlags | pSrcCol->colFlags) & COLFLAG_HIDDEN 
+    ){
+      return 0;    /* Neither table may have __hidden__ columns */
+    }
+#endif    
     if( pDestCol->affinity!=pSrcCol->affinity ){
       return 0;    /* Affinity must be the same on all columns */
     }

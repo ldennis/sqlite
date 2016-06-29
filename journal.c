@@ -24,6 +24,10 @@
 **      buffer, or
 **   2) The sqlite3JournalCreate() function is called.
 */
+
+/* COMDB2 MODIFICATION */
+static int i_am_not_an_empty_file;
+
 #ifdef SQLITE_ENABLE_ATOMIC_WRITE
 #include "sqliteInt.h"
 
