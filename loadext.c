@@ -402,7 +402,21 @@ static const sqlite3_api_routines sqlite3Apis = {
   sqlite3_reset_auto_extension,
   sqlite3_result_blob64,
   sqlite3_result_text64,
-  sqlite3_strglob
+  sqlite3_strglob,
+  /* Version 3.8.11 and later */
+  (sqlite3_value*(*)(const sqlite3_value*))sqlite3_value_dup,
+  sqlite3_value_free,
+  sqlite3_result_zeroblob64,
+  sqlite3_bind_zeroblob64,
+  /* Version 3.9.0 and later */
+  sqlite3_value_subtype,
+  sqlite3_result_subtype,
+  /* Version 3.10.0 and later */
+  sqlite3_status64,
+  sqlite3_strlike,
+  sqlite3_db_cacheflush,
+  /* Version 3.12.0 and later */
+  sqlite3_system_errno
 };
 
 /*
@@ -430,7 +444,7 @@ static int sqlite3LoadExtension(
   const char *zEntry;
   char *zAltEntry = 0;
   void **aHandle;
-  int nMsg = 300 + sqlite3Strlen30(zFile);
+  u64 nMsg = 300 + sqlite3Strlen30(zFile);
   int ii;
 
   /* Shared library endings to try if zFile cannot be loaded as written */
@@ -450,8 +464,9 @@ static int sqlite3LoadExtension(
   /* Ticket #1863.  To avoid a creating security problems for older
   ** applications that relink against newer versions of SQLite, the
   ** ability to run load_extension is turned off by default.  One
-  ** must call sqlite3_enable_load_extension() to turn on extension
-  ** loading.  Otherwise you get the following error.
+  ** must call either sqlite3_enable_load_extension(db) or
+  ** sqlite3_db_config(db, SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION, 1, 0)
+  ** to turn on extension loading.
   */
   if( (db->flags & SQLITE_LoadExtension)==0 ){
     if( pzErrMsg ){
@@ -466,14 +481,14 @@ static int sqlite3LoadExtension(
 #if SQLITE_OS_UNIX || SQLITE_OS_WIN
   for(ii=0; ii<ArraySize(azEndings) && handle==0; ii++){
     char *zAltFile = sqlite3_mprintf("%s.%s", zFile, azEndings[ii]);
-    if( zAltFile==0 ) return SQLITE_NOMEM;
+    if( zAltFile==0 ) return SQLITE_NOMEM_BKPT;
     handle = sqlite3OsDlOpen(pVfs, zAltFile);
     sqlite3_free(zAltFile);
   }
 #endif
   if( handle==0 ){
     if( pzErrMsg ){
-      *pzErrMsg = zErrmsg = sqlite3_malloc(nMsg);
+      *pzErrMsg = zErrmsg = sqlite3_malloc64(nMsg);
       if( zErrmsg ){
         sqlite3_snprintf(nMsg, zErrmsg, 
             "unable to open shared library [%s]", zFile);
@@ -499,10 +514,10 @@ static int sqlite3LoadExtension(
   if( xInit==0 && zProc==0 ){
     int iFile, iEntry, c;
     int ncFile = sqlite3Strlen30(zFile);
-    zAltEntry = sqlite3_malloc(ncFile+30);
+    zAltEntry = sqlite3_malloc64(ncFile+30);
     if( zAltEntry==0 ){
       sqlite3OsDlClose(pVfs, handle);
-      return SQLITE_NOMEM;
+      return SQLITE_NOMEM_BKPT;
     }
     memcpy(zAltEntry, "sqlite3_", 8);
     for(iFile=ncFile-1; iFile>=0 && zFile[iFile]!='/'; iFile--){}
@@ -521,7 +536,7 @@ static int sqlite3LoadExtension(
   if( xInit==0 ){
     if( pzErrMsg ){
       nMsg += sqlite3Strlen30(zEntry);
-      *pzErrMsg = zErrmsg = sqlite3_malloc(nMsg);
+      *pzErrMsg = zErrmsg = sqlite3_malloc64(nMsg);
       if( zErrmsg ){
         sqlite3_snprintf(nMsg, zErrmsg,
             "no entry point [%s] in shared library [%s]", zEntry, zFile);
@@ -545,7 +560,7 @@ static int sqlite3LoadExtension(
   /* Append the new shared library handle to the db->aExtension array. */
   aHandle = sqlite3DbMallocZero(db, sizeof(handle)*(db->nExtension+1));
   if( aHandle==0 ){
-    return SQLITE_NOMEM;
+    return SQLITE_NOMEM_BKPT;
   }
   if( db->nExtension>0 ){
     memcpy(aHandle, db->aExtension, sizeof(handle)*db->nExtension);
@@ -590,9 +605,9 @@ void sqlite3CloseExtensions(sqlite3 *db){
 int sqlite3_enable_load_extension(sqlite3 *db, int onoff){
   sqlite3_mutex_enter(db->mutex);
   if( onoff ){
-    db->flags |= SQLITE_LoadExtension;
+    db->flags |= SQLITE_LoadExtension|SQLITE_LoadExtFunc;
   }else{
-    db->flags &= ~SQLITE_LoadExtension;
+    db->flags &= ~(SQLITE_LoadExtension|SQLITE_LoadExtFunc);
   }
   sqlite3_mutex_leave(db->mutex);
   return SQLITE_OK;
@@ -620,7 +635,7 @@ static const sqlite3_api_routines sqlite3Apis = { 0 };
 */
 typedef struct sqlite3AutoExtList sqlite3AutoExtList;
 static SQLITE_WSD struct sqlite3AutoExtList {
-  int nExt;              /* Number of entries in aExt[] */          
+  u32 nExt;              /* Number of entries in aExt[] */          
   void (**aExt)(void);   /* Pointers to the extension init functions */
 } sqlite3Autoext = { 0, 0 };
 
@@ -653,7 +668,7 @@ int sqlite3_auto_extension(void (*xInit)(void)){
   }else
 #endif
   {
-    int i;
+    u32 i;
 #if SQLITE_THREADSAFE
     sqlite3_mutex *mutex = sqlite3MutexAlloc(SQLITE_MUTEX_STATIC_MASTER);
 #endif
@@ -663,11 +678,11 @@ int sqlite3_auto_extension(void (*xInit)(void)){
       if( wsdAutoext.aExt[i]==xInit ) break;
     }
     if( i==wsdAutoext.nExt ){
-      int nByte = (wsdAutoext.nExt+1)*sizeof(wsdAutoext.aExt[0]);
+      u64 nByte = (wsdAutoext.nExt+1)*sizeof(wsdAutoext.aExt[0]);
       void (**aNew)(void);
-      aNew = sqlite3_realloc(wsdAutoext.aExt, nByte);
+      aNew = sqlite3_realloc64(wsdAutoext.aExt, nByte);
       if( aNew==0 ){
-        rc = SQLITE_NOMEM;
+        rc = SQLITE_NOMEM_BKPT;
       }else{
         wsdAutoext.aExt = aNew;
         wsdAutoext.aExt[wsdAutoext.nExt] = xInit;
@@ -697,7 +712,7 @@ int sqlite3_cancel_auto_extension(void (*xInit)(void)){
   int n = 0;
   wsdAutoextInit;
   sqlite3_mutex_enter(mutex);
-  for(i=wsdAutoext.nExt-1; i>=0; i--){
+  for(i=(int)wsdAutoext.nExt-1; i>=0; i--){
     if( wsdAutoext.aExt[i]==xInit ){
       wsdAutoext.nExt--;
       wsdAutoext.aExt[i] = wsdAutoext.aExt[wsdAutoext.nExt];
@@ -735,7 +750,7 @@ void sqlite3_reset_auto_extension(void){
 ** If anything goes wrong, set an error in the database connection.
 */
 void sqlite3AutoLoadExtensions(sqlite3 *db){
-  int i;
+  u32 i;
   int go = 1;
   int rc;
   int (*xInit)(sqlite3*,char**,const sqlite3_api_routines*);

@@ -70,6 +70,7 @@ const unsigned char sqlite3UpperToLower[] = {
 **   isxdigit()                       0x08
 **   toupper()                        0x20
 **   SQLite identifier character      0x40
+**   Quote character                  0x80
 **
 ** Bit 0x20 is set if the mapped character requires translation to upper
 ** case. i.e. if the character is a lower-case ASCII character.
@@ -95,7 +96,7 @@ const unsigned char sqlite3CtypeMap[256] = {
   0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00,  /* 08..0f    ........ */
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* 10..17    ........ */
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* 18..1f    ........ */
-  0x01, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00,  /* 20..27     !"#$%&' */
+  0x01, 0x00, 0x80, 0x00, 0x40, 0x00, 0x00, 0x80,  /* 20..27     !"#$%&' */
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* 28..2f    ()*+,-./ */
   0x0c, 0x0c, 0x0c, 0x0c, 0x0c, 0x0c, 0x0c, 0x0c,  /* 30..37    01234567 */
   0x0c, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* 38..3f    89:;<=>? */
@@ -103,8 +104,8 @@ const unsigned char sqlite3CtypeMap[256] = {
   0x00, 0x0a, 0x0a, 0x0a, 0x0a, 0x0a, 0x0a, 0x02,  /* 40..47    @ABCDEFG */
   0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02,  /* 48..4f    HIJKLMNO */
   0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02,  /* 50..57    PQRSTUVW */
-  0x02, 0x02, 0x02, 0x00, 0x00, 0x00, 0x00, 0x40,  /* 58..5f    XYZ[\]^_ */
-  0x00, 0x2a, 0x2a, 0x2a, 0x2a, 0x2a, 0x2a, 0x22,  /* 60..67    `abcdefg */
+  0x02, 0x02, 0x02, 0x80, 0x00, 0x00, 0x00, 0x40,  /* 58..5f    XYZ[\]^_ */
+  0x80, 0x2a, 0x2a, 0x2a, 0x2a, 0x2a, 0x2a, 0x22,  /* 60..67    `abcdefg */
   0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,  /* 68..6f    hijklmno */
   0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,  /* 70..77    pqrstuvw */
   0x22, 0x22, 0x22, 0x00, 0x00, 0x00, 0x00, 0x00,  /* 78..7f    xyz{|}~. */
@@ -159,6 +160,18 @@ const unsigned char sqlite3CtypeMap[256] = {
 # define SQLITE_SORTER_PMASZ 250
 #endif
 
+/* Statement journals spill to disk when their size exceeds the following
+** threashold (in bytes). 0 means that statement journals are created and
+** written to disk immediately (the default behavior for SQLite versions
+** before 3.12.0).  -1 means always keep the entire statement journal in
+** memory.  (The statement journal is also always held entirely in memory
+** if journal_mode=MEMORY or if temp_store=MEMORY, regardless of this
+** setting.)
+*/
+#ifndef SQLITE_STMTJRNL_SPILL 
+# define SQLITE_STMTJRNL_SPILL (64*1024)
+#endif
+
 /*
 ** The following singleton contains the global configuration for
 ** the SQLite library.
@@ -173,6 +186,7 @@ SQLITE_WSD struct Sqlite3Config sqlite3Config = {
    0,                         /* neverCorrupt */
    128,                       /* szLookaside */
    500,                       /* nLookaside */
+   SQLITE_STMTJRNL_SPILL,     /* nStmtSpill */
    {0,0,0,0,0,0,0,0},         /* m */
    {0,0,0,0,0,0,0,0,0},       /* mutex */
    {0,0,0,0,0,0,0,0,0,0,0,0,0},/* pcache2 */
@@ -186,7 +200,7 @@ SQLITE_WSD struct Sqlite3Config sqlite3Config = {
    0,                         /* nScratch */
    (void*)0,                  /* pPage */
    0,                         /* szPage */
-   0,                         /* nPage */
+   SQLITE_DEFAULT_PCACHE_INITSZ, /* nPage */
    0,                         /* mxParserStack */
    0,                         /* sharedCacheEnabled */
    SQLITE_SORTER_PMASZ,       /* szPma */
@@ -219,7 +233,7 @@ SQLITE_WSD struct Sqlite3Config sqlite3Config = {
 ** database connections.  After initialization, this table is
 ** read-only.
 */
-SQLITE_WSD FuncDefHash sqlite3GlobalFunctions;
+FuncDefHash sqlite3BuiltinFunctions;
 
 /*
 ** Constant tokens for values 0 and 1.
@@ -260,3 +274,8 @@ int sqlite3PendingByte = 0x40000000;
 ** the vdbe.c file.  
 */
 const unsigned char sqlite3OpcodeProperty[] = OPFLG_INITIALIZER;
+
+/*
+** Name of the default collating sequence
+*/
+const char sqlite3StrBINARY[] = "BINARY";
