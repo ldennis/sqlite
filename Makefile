@@ -8,7 +8,7 @@ MODULE=sqlite
 MEMGENOBJ=mem_$(MODULE).o
 OBJS= analyze.o attach.o auth.o bitvec.o btmutex.o build.o callback.o	\
 	  complete.o ctime.o decimal.o dbstat.o delete.o dttz.o		\
-	  expr.o fault.o func.o global.o hash.o insert.o journal.o	\
+	  expr.o fault.o func.o global.o hash.o insert.o 	        \
 	  legacy.o loadext.o main.o malloc.o mem1.o memjournal.o	\
 	  mutex.o mutex_noop.o mutex_unix.o os.o os_unix.o pragma.o	\
 	  prepare.o printf.o random.o resolve.o rowset.o select.o	\
@@ -64,9 +64,9 @@ parse.c: lemon parse.y lempar.c
 	rm -rf inline/; mkdir inline
 	./lemon $(SQLITE_FLAGS) parse.y
 	mv parse.h parse.h.temp
-	gawk -f addopcodes.awk parse.h.temp > parse.h
-	cat parse.h vdbe.c | gawk -f mkopcodeh.awk > opcodes.h
-	sort -n -b -k 3 opcodes.h | gawk -f mkopcodec.awk > opcodes.c
+	tclsh addopcodes.tcl > parse.h
+	cat parse.h vdbe.c | tclsh mkopcodeh.tcl > opcodes.h
+	sort -n -b -k 3 opcodes.h | tclsh mkopcodec.tcl> opcodes.c
 
 opcodes.h: parse.c
 opcodes.c: parse.c
