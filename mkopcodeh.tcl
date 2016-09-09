@@ -143,12 +143,17 @@ set rp2v_ops {
   OP_PrevIfOpen
 }
 
+set max 0
 # Assign small values to opcodes that are processed by resolveP2Values()
 # to make code generation for the switch() statement smaller and faster.
 #
 set cnt -1
 for {set i 0} {$i<$nOp} {incr i} {
   set name $order($i)
+  if {$op($name)>=0} {
+      set max [expr $max > $op($name) ? $max : $op($name)]
+      continue
+  }
   if {[lsearch $rp2v_ops $name]>=0} {
     incr cnt
     while {[info exists used($cnt)]} {incr cnt}
@@ -158,12 +163,15 @@ for {set i 0} {$i<$nOp} {incr i} {
   }
 }
 
-# Assign the next group of values to JUMP opcodes
+# COMDB2 MODIFICATIONS
+# Assign values to all remaining opcodes
 #
 for {set i 0} {$i<$nOp} {incr i} {
   set name $order($i)
-  if {$op($name)>=0} continue
-  if {!$jump($name)} continue
+  if {$op($name)>=0} {
+      set max [expr $max > $op($name) ? $max : $op($name)]
+      continue
+  }
   incr cnt
   while {[info exists used($cnt)]} {incr cnt}
   set op($name) $cnt
@@ -179,21 +187,8 @@ for {set i 0} {$i<$nOp} {incr i} {
   if {$jump($name) && $op($name)>$mxJump} {set mxJump $op($name)}
 }
 
-
-# Generate the numeric values for all remaining opcodes
-#
-for {set i 0} {$i<$nOp} {incr i} {
-  set name $order($i)
-  if {$op($name)<0} {
-    incr cnt
-    while {[info exists used($cnt)]} {incr cnt}
-    set op($name) $cnt
-    set used($cnt) 1
-    set def($cnt) $name
-  }
-}
-set max $cnt
-for {set i 0} {$i<$nOp} {incr i} {
+set max [expr $max > $cnt ? $max : $cnt]
+for {set i 0} {$i<=$max} {incr i} {
   if {![info exists used($i)]} {
     set def($i) "OP_NotUsed_$i"
   }
@@ -217,6 +212,7 @@ for {set i 0} {$i<$nOp} {incr i} {
   puts ""
 }
 
+set max $cnt
 # Generate the bitvectors:
 #
 set bv(0) 0

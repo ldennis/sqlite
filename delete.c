@@ -13,6 +13,8 @@
 ** in order to generate code for DELETE FROM statements.
 */
 #include "sqliteInt.h"
+extern int gbl_update_delete_limit;
+extern int gbl_partial_indexes;
 
 /*
 ** While a SrcList can in general represent multiple tables and subqueries
@@ -138,6 +140,12 @@ Expr *sqlite3LimitWhere(
   ExprList *pEList = NULL;     /* Expression list contaning only pSelectRowid */
   SrcList *pSelectSrc = NULL;  /* SELECT rowid FROM x ... (dup of pSrc) */
   Select *pSelect = NULL;      /* Complete SELECT tree */
+
+  /* COMDB2 MODIFICATION */
+  if (pLimit && gbl_update_delete_limit == 0) {
+    sqlite3ErrorMsg(pParse, "LIMIT on %s without lrl option: update_delete_limit", zStmtType);
+    goto limit_where_cleanup;
+  }
 
   /* Check that there isn't an ORDER BY without a LIMIT clause.
   */
@@ -399,9 +407,9 @@ void sqlite3DeleteFrom(
     ** to be deleted, based on the WHERE clause. Set variable eOnePass
     ** to indicate the strategy used to implement this delete:
     **
-    **  ONEPASS_OFF:    Two-pass approach - use a FIFO for rowids/PK values.
-    **  ONEPASS_SINGLE: One-pass approach - at most one row deleted.
-    **  ONEPASS_MULTI:  One-pass approach - any number of rows may be deleted.
+    **   ONEPASS_OFF:    Two-pass approach - use a FIFO for rowids/PK values.
+    **   ONEPASS_SINGLE: One-pass approach - at most one row deleted.
+    **   ONEPASS_MULTI:  One-pass approach - any number of rows may be deleted.
     */
     pWInfo = sqlite3WhereBegin(pParse, pTabList, pWhere, 0, 0, wcf, iTabCur+1);
     if( pWInfo==0 ) goto delete_from_cleanup;
@@ -465,7 +473,7 @@ void sqlite3DeleteFrom(
     }else{
       sqlite3WhereEnd(pWInfo);
     }
-  
+
     /* Unless this is a view, open cursors for the table we are 
     ** deleting from and all its indices. If this is a view, then the
     ** only effect this statement has is to fire the INSTEAD OF 
@@ -633,7 +641,7 @@ void sqlite3GenerateRowDelete(
   i16 nPk,           /* Number of PRIMARY KEY memory cells */
   u8 count,          /* If non-zero, increment the row change counter */
   u8 onconf,         /* Default ON CONFLICT policy for triggers */
-  u8 eMode,          /* ONEPASS_OFF, _SINGLE, or _MULTI.  See above */
+  u8 eMode,          /* ONEPASS_OFF, _SINGLE or _MULTI. See above */
   int iIdxNoSeek     /* Cursor number of cursor that does not need seeking */
 ){
   Vdbe *v = pParse->pVdbe;        /* Vdbe */
@@ -719,7 +727,7 @@ void sqlite3GenerateRowDelete(
   */ 
   if( pTab->pSelect==0 ){
     u8 p5 = 0;
-    sqlite3GenerateRowIndexDelete(pParse, pTab, iDataCur, iIdxCur,0,iIdxNoSeek);
+    sqlite3GenerateRowIndexDelete(pParse, pTab, iDataCur, iIdxCur, 0,iIdxNoSeek);
     sqlite3VdbeAddOp2(v, OP_Delete, iDataCur, (count?OPFLAG_NCHANGE:0));
     sqlite3VdbeChangeP4(v, -1, (char*)pTab, P4_TABLE);
     if( eMode!=ONEPASS_OFF ){
@@ -775,6 +783,7 @@ void sqlite3GenerateRowIndexDelete(
   int *aRegIdx,      /* Only delete if aRegIdx!=0 && aRegIdx[i]>0 */
   int iIdxNoSeek     /* Do not delete from this cursor */
 ){
+
   int i;             /* Index loop counter */
   int r1 = -1;       /* Register holding an index key */
   int iPartIdxLabel; /* Jump destination for skipping partial index entries */
@@ -782,6 +791,10 @@ void sqlite3GenerateRowIndexDelete(
   Index *pPrior = 0; /* Prior index */
   Vdbe *v;           /* The prepared statement under construction */
   Index *pPk;        /* PRIMARY KEY index, or NULL for rowid tables */
+
+  /* COMDB2 MODIFICATION */
+  if ( !gbl_partial_indexes || !pTab->hasPartIdx )
+      return;
 
   v = pParse->pVdbe;
   pPk = HasRowid(pTab) ? 0 : sqlite3PrimaryKeyIndex(pTab);

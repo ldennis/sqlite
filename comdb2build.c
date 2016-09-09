@@ -219,29 +219,27 @@ int comdb2AuthenticateUserOp(Vdbe* v, Parse* pParse)
 int comdb2SqlSchemaChange(OpFunc *f)
 {
     struct sql_thread *thd = pthread_getspecific(query_info_key);
-
     struct schema_change_type *s = (struct schema_change_type*)f->arg;
-    
     thd->sqlclntstate->osql.long_request = 1;
     osql_sock_start(thd->sqlclntstate, OSQL_SOCK_REQ ,0);
     osql_schemachange_logic(s, thd);
     int rst = osql_sock_commit(thd->sqlclntstate, OSQL_SOCK_REQ);
-    
-    int rc = thd->sqlclntstate->osql.xerr.errval;
-    thd->sqlclntstate->osql.xerr.errval = 0;
-    thd->sqlclntstate->osql.xerr.errstr[0] = '\0';
-    
-    
-    if (rst)
-    {
-        f->rc = rc;
-        f->errorMsg = "FAIL"; // TODO This must be translated to a description
-    } else
-    {
-        f->rc = SQLITE_OK;
-        f->errorMsg = "";
-    } 
-    return SQLITE_OK;
+    osqlstate_t *osql = &thd->sqlclntstate->osql;
+    if (osql->xerr.errval == COMDB2_SCHEMACHANGE_OK) {
+        osql->xerr.errval = 0;
+    }
+    f->rc = osql->xerr.errval;
+    f->errorMsg = osql->xerr.errstr;
+    return f->rc;
+}
+
+static int comdb2ProcSchemaChange(OpFunc *f)
+{
+	int rc = comdb2SqlSchemaChange(f);
+	if (rc == 0) {
+		opFuncPrintf(f, "%s", f->errorMsg);
+	}
+	return rc;
 }
 
 void free_rstMsg(struct rstMsg* rec)
@@ -303,39 +301,45 @@ static void comdb2rebuild(Parse *p, Token* nm, Token* lnm, uint8_t opt);
 
 /************************** Function definitions ****************************/
 
-void comdb2StartTable(
+void comdb2CreateTable(
   Parse *pParse,   /* Parser context */
   Token *pName1,   /* First part of the name of the table or view */
   Token *pName2,   /* Second part of the name of the table or view */
   int opt,         /* True if this is a TEMP table */
-  Token *csc2
+  Token *csc2,
+  int temp,
+  int noErr
 )
 {
+    struct schema_change_type* sc = NULL;
     sqlite3 *db = pParse->db;
     Vdbe *v  = sqlite3GetVdbe(pParse);
-    
     if (comdb2AuthenticateUserOp(v, pParse))
         return;
-
-    struct schema_change_type* sc = new_schemachange_type();
-
-    if (sc == NULL)
-    {
+    if (temp) {
+        setError(pParse, SQLITE_MISUSE, "can't create temp csc2 table");
+	return;
+    }
+    sc = new_schemachange_type();
+    if (sc == NULL) {
         setError(pParse, SQLITE_NOMEM, "System out of memory");
         return;
     }
-
+    TokenStr(table, pName1);
+    if (noErr && getdbbyname(table))
+            goto out;
     if (chkAndCopyTableTokens(v, pParse, sc->table, pName1, pName2, 0))
-        return;
-
+        goto out;
     v->readOnly = 0;
     sc->addonly = 1;
     sc->nothrevent = 1;
     sc->live = 1;
     fillTableOption(sc, opt);
-
     copyNosqlToken(v, pParse, &sc->newcsc2, csc2);
     comdb2prepareNoRows(v, pParse, 0, sc, &comdb2SqlSchemaChange, (vdbeFuncArgFree) &free_schema_change_type);
+    return;
+out:
+    free_schema_change_type(sc);
 
 }
 
@@ -497,6 +501,7 @@ void comdb2truncate(Parse* pParse, Token* nm, Token* lnm)
     v->readOnly = 0;
     sc->fastinit = 1;
     sc->nothrevent = 1;
+    sc->same_schema = 1;
 
     if(get_csc2_file(sc->table, -1 , &sc->newcsc2, NULL ))
     {
@@ -562,61 +567,68 @@ void comdb2rebuildIndex(Parse* pParse, Token* nm, Token* lnm, Token* index)
 
 /********************** STORED PROCEDURES ****************************************/
 
-
-void comdb2createproc(Parse* pParse, Token* nm, Token* proc)
+void comdb2CreateProcedure(Parse* pParse, Token* nm, Token* ver, Token* proc)
 {
     Vdbe *v  = sqlite3GetVdbe(pParse);
-    int rc;   
-    struct schema_change_type* sc = new_schemachange_type();
-    int max_length = nm->n < MAXTABLELEN ? nm->n : MAXTABLELEN;
-    
     if (comdb2AuthenticateUserOp(v, pParse))
         return;     
-
-    strncpy(sc->table, nm->z, max_length);
-    
-    if (sc == NULL)
-    {
-        setError(pParse, SQLITE_NOMEM, "System out of memory");
+    TokenStr(name, nm);
+    if (strlen(name) >= MAX_SPNAME) {
+        sqlite3ErrorMsg(pParse, "bad procedure name:%s", name);
         return;
     }
+    struct schema_change_type* sc = new_schemachange_type();
+    strcpy(sc->table, name);
     sc->newcsc2 = malloc(proc->n);
-    
-    v->readOnly = 0;
     sc->addsp = 1;
+    if (ver) {
+        TokenStr(version, ver);
+        size_t len = strlen(version);
+        if (len == 0 || len >= MAX_SPVERSION_LEN) {
+            sqlite3ErrorMsg(pParse, "bad procedure version:%s", version);
+            return;
+        }
+        strcpy(sc->fname, version);
+    }
     copyNosqlToken(v, pParse, &sc->newcsc2, proc);
-
-    comdb2prepareNoRows(v, pParse, 0, sc, &comdb2SqlSchemaChange, (vdbeFuncArgFree)  &free_schema_change_type);
-
-  
+    v->readOnly = 0;
+    char* colname[] = {"version"};
+    int coltype = OPFUNC_STRING_TYPE;
+    OpFuncSetup stp = {1, colname, &coltype, 256};
+    comdb2prepareOpFunc(v, pParse, 1, sc, &comdb2ProcSchemaChange, (vdbeFuncArgFree)&free_schema_change_type, &stp);
 }
 
-void comdb2defaultProcedure(Parse* pParse, Token* nm, Token* ver)
+void comdb2DefaultProcedure(Parse* pParse, Token* nm, Token* ver, int str)
 {
     Vdbe *v  = sqlite3GetVdbe(pParse);
-    int rc;   
-    struct schema_change_type* sc = new_schemachange_type();
-    int max_length = nm->n < MAXTABLELEN ? nm->n : MAXTABLELEN;
-    
     if (comdb2AuthenticateUserOp(v, pParse))
         return;     
-
-    strncpy(sc->table, nm->z, max_length);
-    
-    if (sc == NULL)
-    {
-        setError(pParse, SQLITE_NOMEM, "System out of memory");
+    TokenStr(name, nm);
+    if (strlen(name) >= MAX_SPNAME) {
+        sqlite3ErrorMsg(pParse, "bad procedure name:%s", name);
         return;
     }
-    sc->newcsc2 = malloc(ver->n + 1);
-    strncpy(sc->newcsc2, ver->z, ver->n); 
+    struct schema_change_type* sc = new_schemachange_type();
+    strcpy(sc->table, name);
+    if (str) {
+        TokenStr(version, ver);
+        size_t len = strlen(version);
+        if (len == 0 || len >= MAX_SPVERSION_LEN) {
+            sqlite3ErrorMsg(pParse, "bad procedure version:%s", version);
+            return;
+        }
+        strcpy(sc->fname, version);
+    } else {
+        sc->newcsc2 = malloc(ver->n + 1);
+        strncpy(sc->newcsc2, ver->z, ver->n);
+    }
     v->readOnly = 0;
     sc->defaultsp = 1;
 
     comdb2prepareNoRows(v, pParse, 0, sc, &comdb2SqlSchemaChange, (vdbeFuncArgFree)  &free_schema_change_type);
 }
 
-void comdb2dropproc(Parse* pParse, Token* nm, Token* ver)
+void comdb2DropProcedure(Parse* pParse, Token* nm, Token* ver, int str)
 {
     Vdbe *v  = sqlite3GetVdbe(pParse);
     int rc;   
@@ -633,8 +645,13 @@ void comdb2dropproc(Parse* pParse, Token* nm, Token* ver)
         setError(pParse, SQLITE_NOMEM, "System out of memory");
         return;
     }
-    sc->newcsc2 = malloc(ver->n + 1);
-    strncpy(sc->newcsc2, ver->z, ver->n); 
+    if (str) {
+        TokenStr(version, ver);
+        strcpy(sc->fname, version);
+    } else {
+        sc->newcsc2 = malloc(ver->n + 1);
+        strncpy(sc->newcsc2, ver->z, ver->n);
+    }
     v->readOnly = 0;
     sc->delsp = 1;
   
@@ -1316,110 +1333,4 @@ clean:
     free(tablename);
 }
 
-typedef struct 
-{
-    char spname[MAX_SPNAME];
-    int version;
-} read_sp_t;
-
-static int produce_sp_versions(OpFunc *f)
-{
-    int def;
-    int ver;
-    int bdberr = 0;
-    int max = INT_MAX;
-    read_sp_t *arg = f->arg;
-
-    def = bdb_get_sp_get_default_version(arg->spname, &bdberr);
-    if (def < 1 || bdberr) {
-        f->rc = SQLITE_ERROR;
-        f->errorMsg = "bdb_get_sp_get_default_version failed";
-        return SQLITE_ERROR;
-    }
-
-    while (bdb_get_lua_highest(NULL, arg->spname, &ver, max, &bdberr) == 0) {
-        if (ver < 1)
-            break;
-        opFuncWriteInteger(f, ver);
-        opFuncWriteInteger(f, ver == def);
-        max = ver;
-    }
-    f->rc = SQLITE_OK;
-    f->errorMsg = NULL;
-    return SQLITE_OK;
-}
-
-static void list_procedure_versions(Parse* p, Token *name)
-{
-    char sp[name->n + 1];
-    memcpy(sp, name->z, name->n);
-    sp[name->n] = '\0';
-
-    int bdb_err;
-	if (bdb_get_sp_get_default_version(sp, &bdb_err) < 0) {
-		sqlite3ErrorMsg(p, "no such procedure: %s", sp);
-        return;
-    }
-
-    char* colname[] = {"version", "default"};
-    int coltype[] = {OPFUNC_INT_TYPE, OPFUNC_INT_TYPE};
-    OpFuncSetup stp = {2, colname, coltype, 4096};
-
-    read_sp_t *arg = malloc(sizeof(read_sp_t));
-    strcpy(arg->spname, sp);
-    arg->version = -1;
-
-    Vdbe *v  = sqlite3GetVdbe(p);
-    comdb2prepareOpFunc(v, p, 0, arg, &produce_sp_versions, (vdbeFuncArgFree)  &free, &stp);
-}
-
-static int produce_df_sp(OpFunc *f)
-{
-    read_sp_t *arg = (read_sp_t*) f->arg;
-    char  *spname = (char*) arg->spname;
-    int version = arg->version;
-    char *lua;
-    int size;
-    int bdberr; 
-    int rc = bdb_get_sp_lua_source(NULL, NULL, spname, &lua, version, &size, &bdberr);
-     
-    if (!rc)
-    {
-        opFuncPrintf(f, "%s", lua );
-        f->rc = SQLITE_OK;
-        f->errorMsg = NULL;
-    } else 
-    {
-        f->rc = SQLITE_INTERNAL;
-        f->errorMsg = "Could not read code";
-    }   
-
-    return SQLITE_OK;
-}
-
-void comdb2getProcedure(Parse* pParse, Token *name, int version)
-{
-    if (version == -1) {
-        list_procedure_versions(pParse, name);
-        return;
-    }
-
-    if (version == 0) {
-        setError(pParse, SQLITE_ERROR, "bad sp version");
-        return;
-    }
-
-    Vdbe *v  = sqlite3GetVdbe(pParse);
-    const char* colname[] = {"Code"};
-    const int coltype = OPFUNC_STRING_TYPE;
-    OpFuncSetup stp = {1, colname, &coltype, 4096};
-    read_sp_t *arg = (read_sp_t*) malloc(sizeof(read_sp_t));
-
-    size_t max_length = name->n < MAXTABLELEN ? name->n : MAXTABLELEN;
-    memset(arg->spname, '\0', MAXTABLELEN);
-    strncpy(arg->spname, name->z, max_length);
-    arg->version = version;
-
-    comdb2prepareOpFunc(v, pParse, 0, arg, &produce_df_sp, (vdbeFuncArgFree)  &free, &stp);
-}
 /* vim: set ts=4 sw=4 et: */

@@ -106,6 +106,33 @@ int sqlite3_finalize(sqlite3_stmt *pStmt){
   return rc;
 }
 
+
+/*
+** COMDB2 modification to reset the tspec of sqlite machine.
+*/
+int sqlite3_resetclock(sqlite3_stmt *pStmt) {
+  int rc;
+  if( pStmt==0 ){
+    rc = SQLITE_OK;
+  }else{
+    Vdbe *v = (Vdbe*)pStmt;
+    sqlite3_mutex_enter(v->db->mutex);
+    rc = sqlite3VdbeResetClock(v);
+    sqlite3_mutex_leave(v->db->mutex);
+  }
+  return rc;
+}
+
+char *stmt_tzname(sqlite3_stmt *pStmt) {
+  return ((Vdbe *)pStmt)->tzname;
+}
+
+void stmt_set_dtprec(sqlite3_stmt *pStmt, int precision) {
+  /* It's the caller's (currently only Lua)
+     responsiblity to validate the precision */
+  ((Vdbe *)pStmt)->dtprec = precision;
+}
+
 /*
 ** Terminate the current execution of an SQL statement and reset it
 ** back to its starting state so that it can be reused. A success code from
@@ -131,6 +158,57 @@ int sqlite3_reset(sqlite3_stmt *pStmt){
   }
   return rc;
 }
+
+/*
+** COMDB2 MODIFICATION
+** Check if there are remote dbs in the statement
+** Default, sqlite in comdb2 has 2 dbs, "main" and "temp"
+** Anything else is a remote db.
+**
+*/
+int sqlite3_stmt_has_remotes(sqlite3_stmt *pStmt)
+{
+   Vdbe *v = (Vdbe*)pStmt;
+   int   rc = 0;
+
+   if (v)
+   {
+      sqlite3_mutex_enter(v->db->mutex);
+#if SQLITE_MAX_ATTACHED>30
+   /* v->btreeMask is an array */
+      int i;
+      if(v->btreeMask[0] >= 4)
+      {
+        rc = 1;
+      }
+      else
+      {
+        rc = sqlite3DbMaskAllZero(v->btreeMask, 1);
+      }
+#else
+      rc = (v->btreeMask >= 4);
+#endif
+      sqlite3_mutex_leave(v->db->mutex);
+   }
+   return rc;
+}
+
+
+int sqlite3DbMaskAllZero(yDbMask mask, int start)
+{
+   int i;
+
+   for(i=start;i<sizeof(mask)/sizeof(mask[0]); i++)
+   {
+      if(mask[i]!=0)
+      {
+         return 0;
+      }
+   }
+   return 1;
+}
+
+
 
 /*
 ** Set all the parameters in the compiled SQL statement to NULL.
@@ -159,6 +237,35 @@ int sqlite3_clear_bindings(sqlite3_stmt *pStmt){
 ** The following routines extract information from a Mem or sqlite3_value
 ** structure.
 */
+
+/* COMDB2 MODIFICATION */
+const dttz_t *sqlite3_value_datetime(sqlite3_value *pVal){
+  Mem *p = (Mem*)pVal;
+  if( !(p->flags & MEM_Datetime )){
+    if(sqlite3VdbeMemDatetimefy(pVal)) {
+        fprintf(stderr, "sqlite3_value_datetime: failed conversion\n");
+    }
+  }
+  return &p->du.dt;
+}
+const intv_t *sqlite3_value_interval(sqlite3_value *pVal, int type){
+  Mem *p = (Mem*)pVal;
+  if( !(p->flags & MEM_Interval)){
+    if (type == SQLITE_DECIMAL)
+    {
+       if(sqlite3VdbeMemDecimalfy(pVal)) {
+          fprintf(stderr, "sqlite3_value_interval: failed decimal conversion\n");
+       }
+    }
+    else
+    {
+       if(sqlite3VdbeMemIntervalfy(pVal, type)) {
+          fprintf(stderr, "sqlite3_value_interval: failed conversion\n");
+       }
+    }
+  }
+  return &p->du.tv;
+}
 const void *sqlite3_value_blob(sqlite3_value *pVal){
   Mem *p = (Mem*)pVal;
   if( p->flags & (MEM_Blob|MEM_Str) ){
@@ -244,7 +351,42 @@ int sqlite3_value_type(sqlite3_value* pVal){
      SQLITE_INTEGER,  /* 0x1e */
      SQLITE_NULL,     /* 0x1f */
   };
+
+  /* COMDB2 MODIFICATION */
+  if( pVal->flags & MEM_Interval){
+    switch (pVal->du.tv.type) {
+      case INTV_YM_TYPE:
+        return SQLITE_INTERVAL_YM;
+      case INTV_DS_TYPE:
+        return SQLITE_INTERVAL_DS;
+      case INTV_DSUS_TYPE:
+        return SQLITE_INTERVAL_DSUS;
+      default:
+        return SQLITE_DECIMAL;
+    }
+  }else if( pVal->flags & MEM_Datetime ){
+    return (pVal->du.dt.dttz_prec == DTTZ_PREC_USEC)?
+        SQLITE_DATETIMEUS:SQLITE_DATETIME;
+  }
+
   return aType[pVal->flags&MEM_AffMask];
+}
+
+/* COMDB2 MODIFICATION */
+inline int sqlite3_hasNColumns(sqlite3_stmt *pStmt, int n){
+  Vdbe * pVm = (Vdbe *)pStmt;
+  if( pVm && pVm->pResultSet!=0 && n==pVm->nResColumn ){
+      return 1;
+  }
+  return 0;
+}
+
+inline int sqlite3_isColumnNullType(sqlite3_stmt *pStmt, int i){
+
+  Vdbe * pVm = (Vdbe *)pStmt;
+  Mem * pOut = &pVm->pResultSet[i];
+  
+  return pOut->flags & 0x1;  // odd last bit is SQLITE_NULL
 }
 
 /* Make a copy of an sqlite3_value object
@@ -458,6 +600,21 @@ void sqlite3_result_error_code(sqlite3_context *pCtx, int errCode){
   }
 }
 
+/* COMDB2 MODIFICATION */
+void sqlite3_result_datetime(sqlite3_context *pCtx, dttz_t *dt, const char *tz){
+  sqlite3VdbeMemSetDatetime(pCtx->pOut, dt, tz);
+}
+
+/* COMDB2 MODIFICATION */
+void sqlite3_result_interval(sqlite3_context *pCtx, intv_t *pValue){
+  sqlite3VdbeMemSetInterval(pCtx->pOut, pValue);
+}
+
+/* COMDB2 MODIFICATION */
+void sqlite3_result_decimal(sqlite3_context *pCtx, decQuad *dec){
+  sqlite3VdbeMemSetDecimal(pCtx->pOut, dec);
+}
+
 /* Force an SQLITE_TOOBIG error. */
 void sqlite3_result_error_toobig(sqlite3_context *pCtx){
   assert( sqlite3_mutex_held(pCtx->pOut->db->mutex) );
@@ -595,6 +752,10 @@ static int sqlite3Step(Vdbe *p){
     db->nVdbeExec--;
   }
 
+
+  if (rc == SQLITE_COMDB2SCHEMA)
+    return rc;
+
 #ifndef SQLITE_OMIT_TRACE
   /* If the statement completed successfully, invoke the profile callback */
   if( rc!=SQLITE_ROW ) checkProfileCallback(db, p);
@@ -622,6 +783,9 @@ end_of_step:
   */
   assert( rc==SQLITE_ROW  || rc==SQLITE_DONE   || rc==SQLITE_ERROR 
        || (rc&0xff)==SQLITE_BUSY || rc==SQLITE_MISUSE
+       || rc==SQLITE_ABORT
+       /* COMDB2 MODIFICATION */
+       || rc==SQLITE_TOOBIG
   );
   assert( (p->rc!=SQLITE_ROW && p->rc!=SQLITE_DONE) || p->rc==p->rcApp );
   if( p->isPrepareV2 && rc!=SQLITE_ROW && rc!=SQLITE_DONE ){
@@ -661,6 +825,10 @@ int sqlite3_step(sqlite3_stmt *pStmt){
     if( savedPc>=0 ) v->doingRerun = 1;
     assert( v->expired==0 );
   }
+
+  if (rc == SQLITE_COMDB2SCHEMA)
+    return rc;
+
   if( rc2!=SQLITE_OK ){
     /* This case occurs after failing to recompile an sql statement. 
     ** The error message from the SQL compiler has already been loaded 
@@ -915,15 +1083,20 @@ static const Mem *columnNullValue(void){
 #endif
     = {
         /* .u          = */ {0},
+        /* COMDB2 MODIFICATION BEGINS */
+        /* .du         = */ {0},
+        /* .tz         = */ (char*)0,
+        /* .dtprec     = */ (int)0,
+        /* COMDB2 MODIFICATION ENDS */
         /* .flags      = */ (u16)MEM_Null,
         /* .enc        = */ (u8)0,
         /* .eSubtype   = */ (u8)0,
         /* .n          = */ (int)0,
         /* .z          = */ (char*)0,
+        /* .db         = */ (sqlite3*)0,
         /* .zMalloc    = */ (char*)0,
         /* .szMalloc   = */ (int)0,
         /* .uTemp      = */ (u32)0,
-        /* .db         = */ (sqlite3*)0,
         /* .xDel       = */ (void(*)(void*))0,
 #ifdef SQLITE_DEBUG
         /* .pScopyFrom = */ (Mem*)0,
@@ -947,6 +1120,15 @@ static Mem *columnMem(sqlite3_stmt *pStmt, int i){
   if( pVm && pVm->pResultSet!=0 && i<pVm->nResColumn && i>=0 ){
     sqlite3_mutex_enter(pVm->db->mutex);
     pOut = &pVm->pResultSet[i];
+    /* COMDB2 MODIFICATION */
+    /* we need to damn tzname in most impossible functions
+     * so spread it around when you have it 20071010dh */
+    pOut->tz = pVm->tzname;
+    pOut->dtprec = pVm->dtprec;
+    /* COMDB2 MODIFICATION */
+    /* Associate a db with the Mem so we can set errors on it
+     * when there's conversion failures */
+    pOut->db = ((Vdbe*) pStmt)->db;
   }else{
     if( pVm && ALWAYS(pVm->db) ){
       sqlite3_mutex_enter(pVm->db->mutex);
@@ -957,6 +1139,9 @@ static Mem *columnMem(sqlite3_stmt *pStmt, int i){
   return pOut;
 }
 
+#ifdef SQLITE_BUILDING_FOR_COMDB2
+#define columnMallocFailure(pStmt) ((void)0)
+#else
 /*
 ** This function is called after invoking an sqlite3_value_XXX function on a 
 ** column value (i.e. a value returned by evaluating an SQL expression in the
@@ -988,6 +1173,7 @@ static void columnMallocFailure(sqlite3_stmt *pStmt)
     sqlite3_mutex_leave(p->db->mutex);
   }
 }
+#endif
 
 /**************************** sqlite3_column_  *******************************
 ** The following routines are used to access elements of the current row
@@ -1053,6 +1239,16 @@ int sqlite3_column_type(sqlite3_stmt *pStmt, int i){
   int iType = sqlite3_value_type( columnMem(pStmt,i) );
   columnMallocFailure(pStmt);
   return iType;
+}
+
+/* COMDB2 MODIFICATION */
+const dttz_t *sqlite3_column_datetime(sqlite3_stmt *pStmt, int i){
+  return sqlite3_value_datetime( columnMem(pStmt,i) );
+}
+
+/* COMDB2 MODIFICATION */
+const intv_t *sqlite3_column_interval(sqlite3_stmt *pStmt, int i, int type){
+  return sqlite3_value_interval( columnMem(pStmt,i), type );
 }
 
 /*
@@ -1289,7 +1485,50 @@ static int bindText(
   }
   return rc;
 }
+ 
+/* COMDB2 MODIFICATION */
+static int bindDatetime(
+  sqlite3_stmt *pStmt, 
+  int i, dttz_t *dt, char *tz
+){
+  Vdbe *p = (Vdbe *) pStmt;
+  Mem *pVar;
+  int rc;
 
+  rc = vdbeUnbind(p, i);
+  pVar = &p->aVar[i-1];
+  pVar->flags &= ~(MEM_Str|MEM_Static|MEM_Dyn|MEM_Ephem);
+  pVar->flags = MEM_Datetime;
+  pVar->du.dt = *dt;
+  pVar->xDel = NULL;
+  pVar->enc = 0;
+  pVar->tz = tz;
+
+  sqlite3Error(((Vdbe *)pStmt)->db, rc);
+  return sqlite3ApiExit(((Vdbe *)pStmt)->db, rc);
+}
+
+/* COMDB2 MODIFICATION */
+static int bindInterval(
+  sqlite3_stmt *pStmt, 
+  int i, intv_t it
+){
+  Vdbe *p = (Vdbe *) pStmt;
+  Mem *pVar;
+  int rc;
+
+  rc = vdbeUnbind(p, i);
+  pVar = &p->aVar[i-1];
+  pVar->flags = MEM_Interval;
+  pVar->flags &= ~(MEM_Str|MEM_Static|MEM_Dyn|MEM_Ephem);
+  pVar->du.tv = it;
+  pVar->xDel = NULL;
+  pVar->enc = 0;
+  pVar->tz = NULL;
+
+  sqlite3Error(((Vdbe *)pStmt)->db, rc);
+  return sqlite3ApiExit(((Vdbe *)pStmt)->db, rc);
+}
 
 /*
 ** Bind a blob value to an SQL statement variable.
@@ -1853,3 +2092,19 @@ void sqlite3_stmt_scanstatus_reset(sqlite3_stmt *pStmt){
   memset(p->anExec, 0, p->nOp * sizeof(i64));
 }
 #endif /* SQLITE_ENABLE_STMT_SCANSTATUS */
+
+/* COMDB2 MODIFICATION */
+int sqlite3_bind_datetime(
+  sqlite3_stmt *pStmt,
+  int i, dttz_t *dt, char *tz
+){
+  return bindDatetime(pStmt, i, dt, tz);
+}
+
+/* COMDB2 MODIFICATION */
+int sqlite3_bind_interval(
+  sqlite3_stmt *pStmt,
+  int i, intv_t it
+){
+  return bindInterval(pStmt, i, it);
+}

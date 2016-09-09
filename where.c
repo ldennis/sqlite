@@ -19,13 +19,31 @@
 #include "sqliteInt.h"
 #include "whereInt.h"
 
+/* COMDB2 MODIFICATION */
+int sqlite3WhereTrace = 0;
+
 /* Forward declaration of methods */
 static int whereLoopResize(sqlite3*, WhereLoop*, int);
 
-/* Test variable that can be set to enable WHERE tracing */
-#if defined(SQLITE_TEST) || defined(SQLITE_DEBUG)
-/***/ int sqlite3WhereTrace = 0;
-#endif
+int is_comdb2_index_unique(const char *tbl, char *idx);
+int comdb2_get_planner_effort();
+
+static char *comdb2IndexName(char *src, char *dest)
+{
+/* remove leading $ and trailing hash value */
+  if( src[0]!='$' ){
+    return src;
+  }
+  int len = strlen(src);
+  while( src[--len]!='_' )
+    ;
+  dest[--len] = '\0';
+  while( len ){
+    dest[len - 1] = src[len];
+    --len;
+  }
+  return dest;
+}
 
 
 /*
@@ -50,6 +68,19 @@ int sqlite3WhereIsDistinct(WhereInfo *pWInfo){
 int sqlite3WhereIsOrdered(WhereInfo *pWInfo){
   return pWInfo->nOBSat;
 }
+
+/*
+** Return TRUE if the innermost loop of the WHERE clause implementation
+** returns rows in ORDER BY order for complete run of the inner loop.
+**
+** Across multiple iterations of outer loops, the output rows need not be
+** sorted.  As long as rows are sorted for just the innermost loop, this
+** routine can return TRUE.
+*/
+int sqlite3WhereOrderedInnerLoop(WhereInfo *pWInfo){
+  return pWInfo->bOrderedInnerLoop;
+}
+
 
 /*
 ** Return the VDBE address or label to jump to in order to continue
@@ -462,7 +493,9 @@ static int isDistinctRedundant(
   **      contain a "col=X" term are subject to a NOT NULL constraint.
   */
   for(pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext){
-    if( !IsUniqueIndex(pIdx) ) continue;
+    /* COMDB2 MODIFICATION */
+    int is_unique = is_comdb2_index_unique(pTabList->a[0].zName, pIdx->zName);
+    if( !IsUniqueIndex(pIdx) && !is_unique ) continue;
     for(i=0; i<pIdx->nKeyCol; i++){
       if( 0==sqlite3WhereFindTerm(pWC, iBase, i, ~(Bitmask)0, WO_EQ, pIdx) ){
         if( findIndexCol(pParse, pDistinct, iBase, pIdx, i)<0 ) break;
@@ -973,6 +1006,7 @@ static int vtabBestIndex(Parse *pParse, Table *pTab, sqlite3_index_info *p){
 #endif /* !defined(SQLITE_OMIT_VIRTUALTABLE) */
 
 #ifdef SQLITE_ENABLE_STAT3_OR_STAT4
+#include <vdbecompare.c>
 /*
 ** Estimate the location of a particular key among all keys in an
 ** index.  Store the results in aStat as follows:
@@ -1452,6 +1486,7 @@ static int whereRangeScanEst(
           nOut--;
           pUpper = 0;
         }
+
       }
 
       pBuilder->pRec = pRec;
@@ -2286,7 +2321,7 @@ static int whereLoopAddBtreeIndex(
       pNew->wsFlags |= WHERE_COLUMN_EQ;
       assert( saved_nEq==pNew->u.btree.nEq );
       if( iCol==XN_ROWID 
-       || (iCol>0 && nInMul==0 && saved_nEq==pProbe->nKeyCol-1)
+       || (iCol>=0 && nInMul==0 && saved_nEq==pProbe->nKeyCol-1)
       ){
         if( iCol>=0 && pProbe->uniqNotNull==0 ){
           pNew->wsFlags |= WHERE_UNQ_WANTED;
@@ -2689,6 +2724,17 @@ static int whereLoopAddBtree(
       testcase( pNew->iTab!=pSrc->iCursor );  /* See ticket [98d973b8f5] */
       continue;  /* Partial index inappropriate for this query */
     }
+
+    /* COMDB2 MODIFICATION: if index looks like COMDB2_DISABLED_xxx then skip */
+    if(pProbe->zName && strncmp(pProbe->zName, "$COMDB2_DISABLED_", 17) == 0) {
+ #if WHERETRACE_ENABLED /* 0x8 */
+    if( sqlite3WhereTrace&0x4 ){
+          sqlite3DebugPrintf("Not using disabled index %s:%s\n", 
+                pProbe->pTable->zName, pProbe->zName);
+    }        
+ #endif
+        continue;
+    }
     rSize = pProbe->aiRowLogEst[0];
     pNew->u.btree.nEq = 0;
     pNew->nSkip = 0;
@@ -2708,7 +2754,7 @@ static int whereLoopAddBtree(
       /* Full table scan */
       pNew->iSortIdx = b ? iSortIdx : 0;
       /* TUNING: Cost of full table scan is (N*3.0). */
-      pNew->rRun = rSize + 16;
+      pNew->rRun = rSize + 16;/* COMDB2 MODIFICATION: should make it 11;*/
       ApplyCostMultiplier(pNew->rRun, pTab->costMult);
       whereLoopOutputAdjust(pWC, pNew, rSize);
       rc = whereLoopInsert(pBuilder, pNew);
@@ -3250,7 +3296,7 @@ static i8 wherePathSatisfiesOrderBy(
   WhereInfo *pWInfo,    /* The WHERE clause */
   ExprList *pOrderBy,   /* ORDER BY or GROUP BY or DISTINCT clause to check */
   WherePath *pPath,     /* The WherePath to check */
-  u16 wctrlFlags,       /* Might contain WHERE_GROUPBY or WHERE_DISTINCTBY */
+  u16 wctrlFlags,       /* WHERE_GROUPBY or _DISTINCTBY or _ORDERBY_LIMIT */
   u16 nLoop,            /* Number of entries in pPath->aLoop[] */
   WhereLoop *pLast,     /* Add this WhereLoop to the end of pPath->aLoop[] */
   Bitmask *pRevMask     /* OUT: Mask of WhereLoops to run in reverse order */
@@ -3261,6 +3307,7 @@ static i8 wherePathSatisfiesOrderBy(
   u8 isOrderDistinct;   /* All prior WhereLoops are order-distinct */
   u8 distinctColumns;   /* True if the loop has UNIQUE NOT NULL columns */
   u8 isMatch;           /* iColumn matches a term of the ORDER BY clause */
+  u16 eqOpMask;         /* Allowed equality operators */
   u16 nKeyCol;          /* Number of key columns in pIndex */
   u16 nColumn;          /* Total number of ordered columns in the index */
   u16 nOrderBy;         /* Number terms in the ORDER BY clause */
@@ -3311,9 +3358,16 @@ static i8 wherePathSatisfiesOrderBy(
   obDone = MASKBIT(nOrderBy)-1;
   orderDistinctMask = 0;
   ready = 0;
+  eqOpMask = WO_EQ | WO_ISNULL;
+  if( (wctrlFlags & WHERE_ORDERBY_LIMIT)==WHERE_ORDERBY_LIMIT ) eqOpMask |= WO_IN;
   for(iLoop=0; isOrderDistinct && obSat<obDone && iLoop<=nLoop; iLoop++){
     if( iLoop>0 ) ready |= pLoop->maskSelf;
-    pLoop = iLoop<nLoop ? pPath->aLoop[iLoop] : pLast;
+    if( iLoop<nLoop ){
+      pLoop = pPath->aLoop[iLoop];
+      if( (wctrlFlags & WHERE_ORDERBY_LIMIT)==WHERE_ORDERBY_LIMIT ) continue;
+    }else{
+      pLoop = pLast;
+    }
     if( pLoop->wsFlags & WHERE_VIRTUALTABLE ){
       if( pLoop->u.vtab.isOrdered ) obSat = obDone;
       break;
@@ -3331,8 +3385,16 @@ static i8 wherePathSatisfiesOrderBy(
       if( pOBExpr->op!=TK_COLUMN ) continue;
       if( pOBExpr->iTable!=iCur ) continue;
       pTerm = sqlite3WhereFindTerm(&pWInfo->sWC, iCur, pOBExpr->iColumn,
-                       ~ready, WO_EQ|WO_ISNULL|WO_IS, 0);
+                       ~ready, eqOpMask, 0);
       if( pTerm==0 ) continue;
+      if( pTerm->eOperator==WO_IN ){
+        /* IN terms are only valid for sorting in the ORDER BY LIMIT 
+        ** optimization, and then only if they are actually used
+        ** by the query plan */
+        assert( wctrlFlags & WHERE_ORDERBY_LIMIT );
+        for(j=0; j<pLoop->nLTerm && pTerm!=pLoop->aLTerm[j]; j++){}
+        if( j>=pLoop->nLTerm ) continue;
+      }
       if( (pTerm->eOperator&(WO_EQ|WO_IS))!=0 && pOBExpr->iColumn>=0 ){
         const char *z1, *z2;
         pColl = sqlite3ExprCollSeq(pWInfo->pParse, pOrderBy->a[i].pExpr);
@@ -3371,10 +3433,12 @@ static i8 wherePathSatisfiesOrderBy(
       for(j=0; j<nColumn; j++){
         u8 bOnce;   /* True to run the ORDER BY search loop */
 
-        /* Skip over == and IS NULL terms */
+        /* Skip over == and IS and ISNULL terms.
+        ** (Also skip IN terms when doing WHERE_ORDERBY_LIMIT processing)
+        */
         if( j<pLoop->u.btree.nEq
          && pLoop->nSkip==0
-         && ((i = pLoop->aLTerm[j]->eOperator) & (WO_EQ|WO_ISNULL|WO_IS))!=0
+         && ((i = pLoop->aLTerm[j]->eOperator) & eqOpMask)!=0
         ){
           if( i & WO_ISNULL ){
             testcase( isOrderDistinct );
@@ -3560,6 +3624,11 @@ static LogEst whereSortingCost(
   ** The (Y/X) term is implemented using stack variable rScale
   ** below.  */
   LogEst rScale, rSortCost;
+  /* COMDB2 MODIFICATION */
+  extern int gbl_sqlite_sortermult;
+  
+  nRow*=gbl_sqlite_sortermult;
+  
   assert( nOrderBy>0 && 66==sqlite3LogEst(100) );
   rScale = sqlite3LogEst((nOrderBy-nSorted)*100/nOrderBy) - 66;
   rSortCost = nRow + rScale + 16;
@@ -3614,6 +3683,25 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
   ** For 2-way joins, the 5 best paths are followed.
   ** For joins of 3 or more tables, track the 10 best paths */
   mxChoice = (nLoop<=1) ? 1 : (nLoop==2 ? 5 : 10);
+
+  int planner_effort = comdb2_get_planner_effort();
+  WHERETRACE(0x002, ("Planner Effort %d\n", planner_effort));
+#ifdef SQLDEBUG
+      printf("Using planner effort %d\n", planner_effort);
+#endif 
+
+  //planner_effort level 1 is the default
+  if(planner_effort > 1 ) {
+      if(planner_effort < 8 ) 
+          mxChoice += nLoop * planner_effort;
+      else if(planner_effort < 9) 
+          mxChoice += nLoop * nLoop;
+      else if(planner_effort < 10) 
+          mxChoice += nLoop * nLoop * nLoop;
+      else 
+          mxChoice += nLoop * nLoop * nLoop * nLoop;
+  }
+
   assert( nLoop<=pWInfo->pTabList->nSrc );
   WHERETRACE(0x002, ("---- begin solver.  (nRowEst=%d)\n", nRowEst));
 
@@ -3898,8 +3986,19 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
       }
     }else{
       pWInfo->nOBSat = pFrom->isOrdered;
-      if( pWInfo->nOBSat<0 ) pWInfo->nOBSat = 0;
       pWInfo->revMask = pFrom->revLoop;
+      if( pWInfo->nOBSat<=0 ){
+        pWInfo->nOBSat = 0;
+        if( nLoop>0 ){
+          Bitmask m;
+          int rc = wherePathSatisfiesOrderBy(pWInfo, pWInfo->pOrderBy, pFrom,
+                      WHERE_ORDERBY_LIMIT, nLoop-1, pFrom->aLoop[nLoop-1], &m);
+          if( rc==pWInfo->pOrderBy->nExpr ){
+            pWInfo->bOrderedInnerLoop = 1;
+            pWInfo->revMask = m;
+          }
+        }
+      }
     }
     if( (pWInfo->wctrlFlags & WHERE_SORTBYGROUP)
         && pWInfo->nOBSat==pWInfo->pOrderBy->nExpr && nLoop>0
@@ -4486,8 +4585,26 @@ WhereInfo *sqlite3WhereBegin(
       pLevel->iIdxCur = iIndexCur;
       assert( pIx->pSchema==pTab->pSchema );
       assert( iIndexCur>=0 );
+
+      /* COMDB2 MODIFICATION */
+      if(op != OP_ReopenIdx && GET_CURSOR_RECORDING(pParse, pLevel->iTabCur)) 
+          op = OP_OpenRead_Record;
       if( op ){
+        /* COMDB2 MODIFICATION */
+        if (iDb != 1)
+          sqlite3VdbeAddTable(v,pTab);
+
         sqlite3VdbeAddOp3(v, op, iIndexCur, pIx->tnum, iDb);
+
+          /* COMDB2 MODIFICATION */
+          /* TODO: AZ: need to find correct indicator
+          if (sqlite3WhereTrace) {
+            if ((pLoop->wsFlags & WHERE_IDX_ONLY) == 0) {
+              sqlite3VdbeChangeP5(v, 0xff);
+            }
+          }
+          */
+
         sqlite3VdbeSetP4KeyInfo(pParse, pIx);
         if( (pLoop->wsFlags & WHERE_CONSTRAINT)!=0
          && (pLoop->wsFlags & (WHERE_COLUMN_RANGE|WHERE_SKIPSCAN))==0
@@ -4609,7 +4726,8 @@ void sqlite3WhereEnd(WhereInfo *pWInfo){
       sqlite3VdbeJumpHere(v, pLevel->addrSkip);
       sqlite3VdbeJumpHere(v, pLevel->addrSkip-2);
     }
-#ifndef SQLITE_LIKE_DOESNT_MATCH_BLOBS
+#if !defined(SQLITE_BUILDING_FOR_COMDB2) \
+    && !defined(SQLITE_LIKE_DOESNT_MATCH_BLOBS)
     if( pLevel->addrLikeRep ){
       sqlite3VdbeAddOp2(v, OP_DecrJumpZero, (int)(pLevel->iLikeRepCntr>>1),
                         pLevel->addrLikeRep);
@@ -4736,3 +4854,4 @@ void sqlite3WhereEnd(WhereInfo *pWInfo){
   whereInfoFree(db, pWInfo);
   return;
 }
+/* vim: set ts=2 sw=2: */

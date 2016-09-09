@@ -200,7 +200,11 @@ static const sqlite3_api_routines sqlite3Apis = {
   sqlite3_get_table,
   0,     /* Was sqlite3_global_recover(), but that function is deprecated */
   sqlite3_interrupt,
+#ifndef SQLITE_BUILDING_FOR_COMDB2
   sqlite3_last_insert_rowid,
+#else
+  0,
+#endif
   sqlite3_libversion,
   sqlite3_libversion_number,
   sqlite3_malloc,
@@ -338,11 +342,19 @@ static const sqlite3_api_routines sqlite3Apis = {
   /*
   ** Added for 3.7.4
   */
+#ifndef SQLITE_BUILDING_FOR_COMDB2
   sqlite3_backup_finish,
   sqlite3_backup_init,
   sqlite3_backup_pagecount,
   sqlite3_backup_remaining,
   sqlite3_backup_step,
+#else
+  0,
+  0,
+  0,
+  0,
+  0,
+#endif
 #ifndef SQLITE_OMIT_COMPILEOPTION_DIAGS
   sqlite3_compileoption_get,
   sqlite3_compileoption_used,

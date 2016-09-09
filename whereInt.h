@@ -18,6 +18,12 @@
 /*
 ** Trace output macros
 */
+/* COMDB2 MODIFICATION */
+extern int sqlite3WhereTrace;
+# define WHERETRACE(K,X)  if(sqlite3WhereTrace&(K)) sqlite3DebugPrintf X
+# define WHERETRACE_ENABLED 1
+
+#if 0
 #if defined(SQLITE_TEST) || defined(SQLITE_DEBUG)
 /***/ int sqlite3WhereTrace;
 #endif
@@ -27,6 +33,7 @@
 # define WHERETRACE_ENABLED 1
 #else
 # define WHERETRACE(K,X)
+#endif
 #endif
 
 /* Forward references
@@ -69,7 +76,8 @@ struct WhereLevel {
   int addrCont;         /* Jump here to continue with the next loop cycle */
   int addrFirst;        /* First instruction of interior of the loop */
   int addrBody;         /* Beginning of the body of this loop */
-#ifndef SQLITE_LIKE_DOESNT_MATCH_BLOBS
+#if !defined(SQLITE_BUILDING_FOR_COMDB2) \
+    && !defined(SQLITE_LIKE_DOESNT_MATCH_BLOBS)
   u32 iLikeRepCntr;     /* LIKE range processing counter register (times 2) */
   int addrLikeRep;      /* LIKE range processing address */
 #endif
@@ -111,7 +119,7 @@ struct WhereLevel {
 struct WhereLoop {
   Bitmask prereq;       /* Bitmask of other loops that must run first */
   Bitmask maskSelf;     /* Bitmask identifying table iTab */
-#ifdef SQLITE_DEBUG
+#ifdef WHERETRACE_ENABLED
   char cId;             /* Symbolic ID of this loop for debugging use */
 #endif
   u8 iTab;              /* Position in FROM clause of table for this loop */
@@ -418,8 +426,9 @@ struct WhereInfo {
   u8 sorted;                /* True if really sorted (not just grouped) */
   u8 eOnePass;              /* ONEPASS_OFF, or _SINGLE, or _MULTI */
   u8 untestedTerms;         /* Not all WHERE terms resolved by outer loop */
-  u8 eDistinct;             /* One of the WHERE_DISTINCT_* values below */
+  u8 eDistinct;             /* One of the WHERE_DISTINCT_* values */
   u8 nLevel;                /* Number of nested loop */
+  u8 bOrderedInnerLoop;     /* True if only the inner-most loop is ordered */
   int iTop;                 /* The very beginning of the WHERE loop */
   int iContinue;            /* Jump here to continue with next record */
   int iBreak;               /* Jump here to break out of the loop */

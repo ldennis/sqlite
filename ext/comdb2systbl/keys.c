@@ -168,16 +168,18 @@ static int systblKeysColumn(
       break;
     }
     case STKEY_UNIQUE: {
-      sqlite3_result_text(ctx, YESNO(pSchema->flags & SCHEMA_DUP), -1, NULL);
+      sqlite3_result_text(ctx, YESNO(pSchema->flags & SCHEMA_DUP),
+        -1, SQLITE_STATIC);
       break;
     }
     case STKEY_DATACOPY: {
       sqlite3_result_text(ctx, YESNO(pSchema->flags & SCHEMA_DATACOPY), 
-        -1, NULL);
+        -1, SQLITE_STATIC);
       break;
     }
     case STKEY_RECNUM: {
-      sqlite3_result_text(ctx, YESNO(pSchema->flags & SCHEMA_RECNUM), -1, NULL);
+      sqlite3_result_text(ctx, YESNO(pSchema->flags & SCHEMA_RECNUM),
+        -1, SQLITE_STATIC);
       break;
     }
   }

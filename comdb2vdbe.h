@@ -51,7 +51,4 @@ struct rstMsg
 int comdb2GenerateRstMsg(OpFunc *f);
 void free_rstMsg(struct rstMsg* rec);
 
-void comdb2getProcedure(Parse* pParse, Token *name, int version);
-
-
 #endif // COMDB2VDBE_H

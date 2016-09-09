@@ -107,12 +107,6 @@ Cdb2TrigEvents *comdb2AddTriggerEvent(Parse *pParse, Cdb2TrigEvents *A, Cdb2Trig
 	return A;
 }
 
-#define TokenStr(out, in)                                                      \
-	char out[in->n + 1];                                                   \
-	memcpy(out, in->z, in->n);                                             \
-	out[in->n] = '\0';                                                     \
-	sqlite3Dequote(out)
-
 Cdb2TrigTables *comdb2AddTriggerTable(Parse *parse, Cdb2TrigTables *tables,
 				      SrcList *tbl, Cdb2TrigEvents *events)
 {

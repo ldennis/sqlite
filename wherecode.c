@@ -190,7 +190,7 @@ int sqlite3WhereExplainOneScan(
 #endif
 #ifdef SQLITE_EXPLAIN_ESTIMATED_ROWS
     if( pLoop->nOut>=10 ){
-      sqlite3XPrintf(&str, " (~%llu rows)", sqlite3LogEstToInt(pLoop->nOut));
+      sqlite3XPrintf(&str, " (%llu rows)", sqlite3LogEstToInt(pLoop->nOut));
     }else{
       sqlite3StrAccumAppend(&str, " (~1 row)", 9);
     }
@@ -558,7 +558,8 @@ static int codeAllEqualityTerms(
   return regBase;
 }
 
-#ifndef SQLITE_LIKE_DOESNT_MATCH_BLOBS
+#if !defined(SQLITE_BUILDING_FOR_COMDB2) \
+    && !defined(SQLITE_LIKE_DOESNT_MATCH_BLOBS)
 /*
 ** If the most recently coded instruction is a constant range constraint
 ** (a string literal) that originated from the LIKE optimization, then 
@@ -678,23 +679,57 @@ static int codeCursorHintFixExpr(Walker *pWalker, Expr *pExpr){
 ** Insert an OP_CursorHint instruction if it is appropriate to do so.
 */
 static void codeCursorHint(
+  struct SrcList_item *pTabItem,  /* FROM clause item */
   WhereInfo *pWInfo,    /* The where clause */
   WhereLevel *pLevel,   /* Which loop to provide hints for */
-  WhereTerm *pEndRange  /* Hint this end-of-scan boundary term if not NULL */
+  WhereTerm *pEndRange, /* Hint this end-of-scan boundary term if not NULL */
+  /* COMDB2 MODIFICATION */
+  int iLevel            /* I need this to skip non-remote cursors from hinting */ 
 ){
   Parse *pParse = pWInfo->pParse;
   sqlite3 *db = pParse->db;
   Vdbe *v = pParse->pVdbe;
   Expr *pExpr = 0;
+  /* COMDB2 MODIFICATION:
+    This is from conversation with sqlite. I need this mask
+    "....
+    I did not port the last sqlite patch related to cursor hints to comdb2.  
+    This last patch relates to how = predicates are coded. Adding that patch 
+    would require more restructuring in our code than I felt comfortable doing
+    at the time (or creating redundant predicates in hint expressions, which I
+    disliked as well).
+
+    Instead, I did two hacky things that achieve a similar effect and kept the
+    code working without the last patch,and forgot all about it:
+
+    1) commented out TERM_CODED term
+    2) put back logic to filter expressions that don't apply to hinted cursor
+    (which would skip coded loops, but regenerate some = predicates comdb2 
+    relied on --therefore the comment--, and missing after sqlite changes)
+    ..."
+   */
+  Bitmask msk;
   WhereLoop *pLoop = pLevel->pWLoop;
   int iCur;
   WhereClause *pWC;
   WhereTerm *pTerm;
-  int i, j;
+  WhereLoop *pWLoop;
+  int i,j;
   struct CCurHint sHint;
   Walker sWalker;
 
   if( OptimizationDisabled(db, SQLITE_CursorHints) ) return;
+
+  /* COMDB2 MODIFICATIONS */
+  /* we really need to run this only for remote cursors */
+  if (pWInfo->pTabList->a[iLevel].zDatabase == NULL) /* hack, at this point only remcurs have it */
+    return;
+
+  /* COMDB2 MODIFICATION */
+  /* I need this Mask since the code lower ignores TERM_CODED !!!!*/
+  iCur = pLevel->iIdxCur;
+  msk = sqlite3WhereGetMask(&pWInfo->sMaskSet, pWInfo->pTabList->a[pLevel->iFrom].iCursor);
+
   iCur = pLevel->iTabCur;
   assert( iCur==pWInfo->pTabList->a[pLevel->iFrom].iCursor );
   sHint.iTabCur = iCur;
@@ -704,45 +739,76 @@ static void codeCursorHint(
   sWalker.pParse = pParse;
   sWalker.u.pCCurHint = &sHint;
   pWC = &pWInfo->sWC;
+  pWLoop = pLevel->pWLoop;
   for(i=0; i<pWC->nTerm; i++){
     pTerm = &pWC->a[i];
-    if( pTerm->wtFlags & (TERM_VIRTUAL|TERM_CODED) ) continue;
+    /* COMDB2 MODIFICATION */
+    /* msk makes sure I consider only terms that
+       apply to the cursor in question */
+    if( !(pTerm->prereqAll & msk)) continue;
+    /* COMDB2 MODIFICATION */
+    /* I need TERM_CODED commented out. Comes hand in hand with  msk,
+       i.e. msk avoid coded predicates for unrelated terms, while 
+       TERM_CODED commented allows me still encode equality operations
+       properly*/
+    if( pTerm->wtFlags & (TERM_VIRTUAL/*|TERM_CODED*/) ) continue;
     if( pTerm->prereqAll & pLevel->notReady ) continue;
     if( ExprHasProperty(pTerm->pExpr, EP_FromJoin) ) continue;
 
+
     /* All terms in pWLoop->aLTerm[] except pEndRange are used to initialize
-    ** the cursor.  These terms are not needed as hints for a pure range
-    ** scan (that has no == terms) so omit them. */
-    if( pLoop->u.btree.nEq==0 && pTerm!=pEndRange ){
-      for(j=0; j<pLoop->nLTerm && pLoop->aLTerm[j]!=pTerm; j++){}
-      if( j<pLoop->nLTerm ) continue;
+    ** the cursor.  No need to hint initialization terms. */
+    if( pTerm!=pEndRange ){
+      for(j=0; j<pWLoop->nLTerm && pWLoop->aLTerm[j]!=pTerm; j++){}
+      if( j<pWLoop->nLTerm ) continue;
     }
 
     /* No subqueries or non-deterministic functions allowed */
     if( sqlite3ExprContainsSubquery(pTerm->pExpr) ) continue;
 
-    /* For an index scan, make sure referenced columns are actually in
-    ** the index. */
+    /* If we survive all prior tests, that means this term is worth hinting */
     if( sHint.pIdx!=0 ){
       sWalker.eCode = 0;
       sWalker.xExprCallback = codeCursorHintCheckExpr;
       sqlite3WalkExpr(&sWalker, pTerm->pExpr);
       if( sWalker.eCode ) continue;
     }
-
-    /* If we survive all prior tests, that means this term is worth hinting */
     pExpr = sqlite3ExprAnd(db, pExpr, sqlite3ExprDup(db, pTerm->pExpr, 0));
-  }
+  } 
   if( pExpr!=0 ){
+#if 0
+  Hipp refactoring and fixes to sqlite, overlapping mine
+
+    const char *a = (const char*)pExpr;
+    Walker sWalker;
+    memset(&sWalker, 0, sizeof(sWalker));
+    sWalker.xExprCallback = codeCursorHintFixExpr;
+    sWalker.pParse = pParse;
+    sWalker.eCode = pLevel->iTabCur;
+    sqlite3WalkExpr(&sWalker, pExpr);
+    /* COMDB2 MODIFICATION */
+    /* NOTE: this seems like a bug in sqlite, p1 should be the cursor and p2 table,
+    so I will flip them to be correct */
+  
+#if 0
+    printf("XXXXX Coding pLevel->iFrom=%d a[].iCursor=%d pLevel->iIdxCur=%d (pLevel->iTabCur=%d)\n",
+      pLevel->iFrom, pWInfo->pTabList->a[pLevel->iFrom].iCursor, pLevel->iIdxCur, pLevel->iTabCur);
+#endif
+
+    sqlite3VdbeAddOp4(v, OP_CursorHint, iCur, pLevel->iTabCur, 0,
+                      (const char*)pExpr, P4_EXPR);
+#endif
+
     sWalker.xExprCallback = codeCursorHintFixExpr;
     sqlite3WalkExpr(&sWalker, pExpr);
     sqlite3VdbeAddOp4(v, OP_CursorHint, 
                       (sHint.pIdx ? sHint.iIdxCur : sHint.iTabCur), 0, 0,
                       (const char*)pExpr, P4_EXPR);
+
   }
 }
 #else
-# define codeCursorHint(A,B,C)  /* No-op */
+# define codeCursorHint(A,B,C,D,E)  /* No-op */
 #endif /* SQLITE_ENABLE_CURSOR_HINTS */
 
 /*
@@ -777,7 +843,7 @@ static void codeDeferredSeek(
   
   sqlite3VdbeAddOp3(v, OP_Seek, iIdxCur, 0, iCur);
   if( (pWInfo->wctrlFlags & WHERE_FORCE_TABLE)
-   && DbMaskAllZero(sqlite3ParseToplevel(pParse)->writeMask)
+   && DbMaskAllZero(sqlite3ParseToplevel(pParse)->writeMask, 0)
   ){
     int i;
     Table *pTab = pIdx->pTable;
@@ -999,7 +1065,7 @@ Bitmask sqlite3WhereCodeOneLoopStart(
       pStart = pEnd;
       pEnd = pTerm;
     }
-    codeCursorHint(pWInfo, pLevel, pEnd);
+    codeCursorHint(pTabItem, pWInfo, pLevel, pEnd, iLevel);
     if( pStart ){
       Expr *pX;             /* The expression that defines the start bound */
       int r1, rTemp;        /* Registers for holding the start boundary */
@@ -1172,7 +1238,8 @@ Bitmask sqlite3WhereCodeOneLoopStart(
     if( pLoop->wsFlags & WHERE_TOP_LIMIT ){
       pRangeEnd = pLoop->aLTerm[j++];
       nExtraReg = 1;
-#ifndef SQLITE_LIKE_DOESNT_MATCH_BLOBS
+#if !defined(SQLITE_BUILDING_FOR_COMDB2) \
+    && !defined(SQLITE_LIKE_DOESNT_MATCH_BLOBS)
       if( (pRangeEnd->wtFlags & TERM_LIKEOPT)!=0 ){
         assert( pRangeStart!=0 );                     /* LIKE opt constraints */
         assert( pRangeStart->wtFlags & TERM_LIKEOPT );   /* occur in pairs */
@@ -1213,7 +1280,7 @@ Bitmask sqlite3WhereCodeOneLoopStart(
     ** and store the values of those terms in an array of registers
     ** starting at regBase.
     */
-    codeCursorHint(pWInfo, pLevel, pRangeEnd);
+    codeCursorHint(pTabItem, pWInfo, pLevel, pRangeEnd, iLevel);
     regBase = codeAllEqualityTerms(pParse,pLevel,bRev,nExtraReg,&zStartAff);
     assert( zStartAff==0 || sqlite3Strlen30(zStartAff)>=nEq );
     if( zStartAff ) cEndAff = zStartAff[nEq];
@@ -1228,6 +1295,7 @@ Bitmask sqlite3WhereCodeOneLoopStart(
     start_constraints = pRangeStart || nEq>0;
 
     /* Seek the index cursor to the start of the range. */
+    codeCursorHint(pTabItem, pWInfo, pLevel, pRangeEnd, iLevel);
     nConstraint = nEq;
     if( pRangeStart ){
       Expr *pRight = pRangeStart->pExpr->pRight;
@@ -1666,7 +1734,7 @@ Bitmask sqlite3WhereCodeOneLoopStart(
       ** a pseudo-cursor.  No need to Rewind or Next such cursors. */
       pLevel->op = OP_Noop;
     }else{
-      codeCursorHint(pWInfo, pLevel, 0);
+      codeCursorHint(pTabItem, pWInfo, pLevel, 0, iLevel);
       pLevel->op = aStep[bRev];
       pLevel->p1 = iCur;
       pLevel->p2 = 1 + sqlite3VdbeAddOp2(v, aStart[bRev], iCur, addrBrk);
@@ -1706,7 +1774,8 @@ Bitmask sqlite3WhereCodeOneLoopStart(
       ** can skip the call to the like(A,B) function.  But this only works
       ** for strings.  So do not skip the call to the function on the pass
       ** that compares BLOBs. */
-#ifdef SQLITE_LIKE_DOESNT_MATCH_BLOBS
+#if defined(SQLITE_BUILDING_FOR_COMDB2) \
+    || defined(SQLITE_LIKE_DOESNT_MATCH_BLOBS)
       continue;
 #else
       u32 x = pLevel->iLikeRepCntr;

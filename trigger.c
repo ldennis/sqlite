@@ -298,6 +298,9 @@ void sqlite3FinishTrigger(
   /* if we are not initializing,
   ** build the sqlite_master entry
   */
+  /* COMDB2 MODIFICATION */
+  /* FIXME TODO XXX prod has a different scheme. 
+   * see how it fits there */
   if( !db->init.busy ){
     Vdbe *v;
     char *z;
@@ -308,7 +311,7 @@ void sqlite3FinishTrigger(
     sqlite3BeginWriteOperation(pParse, 0, iDb);
     z = sqlite3DbStrNDup(db, (char*)pAll->z, pAll->n);
     sqlite3NestedParse(pParse,
-       "INSERT INTO %Q.%s VALUES('trigger',%Q,%Q,0,'CREATE TRIGGER %q')",
+       "INSERT INTO %Q.%s VALUES('trigger',%Q,%Q,0,'CREATE TRIGGER %q', NULL)",
        db->aDb[iDb].zName, SCHEMA_TABLE(iDb), zName,
        pTrig->table, z);
     sqlite3DbFree(db, z);

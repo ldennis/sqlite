@@ -56,6 +56,7 @@ struct SortCtx {
   int addrSortIndex;    /* Address of the OP_SorterOpen or OP_OpenEphemeral */
   int labelDone;        /* Jump here when done, ex: LIMIT reached */
   u8 sortFlags;         /* Zero or more SORTFLAG_* bits */
+  u8 bOrderedInnerLoop; /* ORDER BY correctly sorts the inner loop */
 };
 #define SORTFLAG_UseSorter  0x01   /* Use SorterOpen instead of OpenEphemeral */
 
@@ -141,10 +142,12 @@ Select *sqlite3SelectNew(
   pNew->pNext = 0;
   pNew->pLimit = pLimit;
   pNew->pOffset = pOffset;
+  /* COMDB2 MODIFICATION */
+  pNew->recording = 0;
   pNew->pWith = 0;
   assert( pOffset==0 || pLimit!=0 || pParse->nErr>0 || db->mallocFailed!=0 );
   if( db->mallocFailed ) {
-    clearSelect(db, pNew, pNew!=&standin);
+    clearSelect(db, pNew, pNew !=&standin);
     pNew = 0;
   }else{
     assert( pNew->pSrc!=0 || pParse->nErr>0 );
@@ -589,9 +592,30 @@ static void pushOntoSorter(
   sqlite3VdbeAddOp2(v, op, pSort->iECursor, regRecord);
   if( iLimit ){
     int addr;
+    int r1 = 0;
+    /* Fill the sorter until it contains LIMIT+OFFSET entries.  (The iLimit
+    ** register is initialized with value of LIMIT+OFFSET.)  After the sorter
+    ** fills up, delete the least entry in the sorter after each insert.
+    ** Thus we never hold more than the LIMIT+OFFSET rows in memory at once */
     addr = sqlite3VdbeAddOp3(v, OP_IfNotZero, iLimit, 0, 1); VdbeCoverage(v);
     sqlite3VdbeAddOp1(v, OP_Last, pSort->iECursor);
+    if( pSort->bOrderedInnerLoop ){
+      r1 = ++pParse->nMem;
+      sqlite3VdbeAddOp3(v, OP_Column, pSort->iECursor, nExpr, r1);
+      VdbeComment((v, "seq"));
+    }
     sqlite3VdbeAddOp1(v, OP_Delete, pSort->iECursor);
+    if( pSort->bOrderedInnerLoop ){
+      /* If the inner loop is driven by an index such that values from
+      ** the same iteration of the inner loop are in sorted order, then
+      ** immediately jump to the next iteration of an inner loop if the
+      ** entry from the current iteration does not fit into the top
+      ** LIMIT+OFFSET entries of the sorter. */
+      int iBrk = sqlite3VdbeCurrentAddr(v) + 2;
+      sqlite3VdbeAddOp3(v, OP_Eq, regBase+nExpr, iBrk, r1);
+      sqlite3VdbeChangeP5(v, SQLITE_NULLEQ);
+      VdbeCoverage(v);
+    }
     sqlite3VdbeJumpHere(v, addr);
   }
 }
@@ -1262,6 +1286,10 @@ static void generateSortTail(
 #ifndef SQLITE_OMIT_SUBQUERY
     case SRT_Set: {
       assert( nColumn==1 );
+      /* COMDB2 MODIFICATION */
+      /* FIXME TODO XXX 
+       * This might be incorrect. prod has some hack to make the following
+       * use numeric type. The opcodes here have changed. Need to verify */
       sqlite3VdbeAddOp4(v, OP_MakeRecord, regRow, 1, regRowid,
                         &pDest->affSdst, 1);
       sqlite3ExprCacheAffinityChange(pParse, regRow, 1);
@@ -1352,8 +1380,15 @@ static const char *columnTypeImpl(
   char const *zOrigCol = 0;
 #endif
 
+/* COMDB2 MODIFICATION */
+/* I need this "bug" to return "wrong" types for comdb2sql */
+#ifdef SQLITE_BUILDING_FOR_COMDB2
+  if( NEVER(pExpr==0) || pNC->pSrcList==0 ) return 0;
+#else
   assert( pExpr!=0 );
   assert( pNC->pSrcList!=0 );
+#endif
+
   switch( pExpr->op ){
     case TK_AGG_COLUMN:
     case TK_COLUMN: {
@@ -1426,8 +1461,17 @@ static const char *columnTypeImpl(
         assert( iCol==-1 || (iCol>=0 && iCol<pTab->nCol) );
 #ifdef SQLITE_ENABLE_COLUMN_METADATA
         if( iCol<0 ){
-          zType = "INTEGER";
-          zOrigCol = "rowid";
+          /* COMDB2 MODIFICATION */
+          switch (iCol) {
+            default:
+              zType = "INTEGER";
+              zOrigCol = "rowid";
+              break;
+            case -3:
+              zType = "DATETIME";
+              zOrigCol = "comdb2_rowtimestamp";
+              break;
+          }
         }else{
           zOrigCol = pTab->aCol[iCol].zName;
           zType = sqlite3ColumnType(&pTab->aCol[iCol],0);
@@ -1450,7 +1494,9 @@ static const char *columnTypeImpl(
       break;
     }
 #ifndef SQLITE_OMIT_SUBQUERY
-    case TK_SELECT: {
+    /* COMDB2 MODIFICATION */
+    case TK_SELECT:
+    case TK_SELECTV: {
       /* The expression is a sub-select. Return the declaration type and
       ** origin info for the single column in the result set of the SELECT
       ** statement.
@@ -1541,9 +1587,15 @@ static void generateColumnNames(
   }
 #endif
 
+/* COMDB2 MODIFICATION */
+/* I need this "bug" to return "wrong" types for comdb2sql */
+#ifdef SQLITE_BUILDING_FOR_COMDB2
+  if( pParse->colNamesSet || NEVER(v==0) || db->mallocFailed ) return;
+#else
   if( pParse->colNamesSet || db->mallocFailed ) return;
   assert( v!=0 );
   assert( pTabList!=0 );
+#endif
   pParse->colNamesSet = 1;
   fullNames = (db->flags & SQLITE_FullColNames)!=0;
   shortNames = (db->flags & SQLITE_ShortColNames)!=0;
@@ -1555,7 +1607,13 @@ static void generateColumnNames(
     if( pEList->a[i].zName ){
       char *zName = pEList->a[i].zName;
       sqlite3VdbeSetColName(v, i, COLNAME_NAME, zName, SQLITE_TRANSIENT);
+/* COMDB2 MODIFICATION */
+/* I need this "bug" to return "wrong" types for comdb2sql */
+#ifdef SQLITE_BUILDING_FOR_COMDB2
+    }else if( (p->op==TK_COLUMN || p->op==TK_AGG_COLUMN) && pTabList ){
+#else
     }else if( p->op==TK_COLUMN || p->op==TK_AGG_COLUMN ){
+#endif
       Table *pTab;
       char *zCol;
       int iCol = p->iColumn;
@@ -1566,8 +1624,16 @@ static void generateColumnNames(
       pTab = pTabList->a[j].pTab;
       if( iCol<0 ) iCol = pTab->iPKey;
       assert( iCol==-1 || (iCol>=0 && iCol<pTab->nCol) );
+      /* COMDB2 MODIFICATION */
       if( iCol<0 ){
-        zCol = "rowid";
+        switch (iCol) {
+          default:
+            zCol = "rowid";
+            break;
+          case -3:
+            zCol = "comdb2_rowtimestamp";
+            break;
+        }
       }else{
         zCol = pTab->aCol[iCol].zName;
       }
@@ -2332,6 +2398,8 @@ static int multiSelect(
         unionTab = pParse->nTab++;
         assert( p->pOrderBy==0 );
         addr = sqlite3VdbeAddOp2(v, OP_OpenEphemeral, unionTab, 0);
+        /* COMDB2 MODIFICATION */
+        sqlite3VdbeChangeP5(v, BTREE_UNORDERED); 
         assert( p->addrOpenEphm[0] == -1 );
         p->addrOpenEphm[0] = addr;
         findRightmost(p)->selFlags |= SF_UsesEphemeral;
@@ -2390,7 +2458,13 @@ static int multiSelect(
         if( dest.eDest==SRT_Output ){
           Select *pFirst = p;
           while( pFirst->pPrior ) pFirst = pFirst->pPrior;
+/* COMDB2 MODIFICATION */
+/* I need this "bug" to return "wrong" types for comdb2sql */
+#ifdef SQLITE_BUILDING_FOR_COMDB2
+          generateColumnNames(pParse, 0, pFirst->pEList);
+#else
           generateColumnNames(pParse, pFirst->pSrc, pFirst->pEList);
+#endif
         }
         iBreak = sqlite3VdbeMakeLabel(v);
         iCont = sqlite3VdbeMakeLabel(v);
@@ -2465,7 +2539,13 @@ static int multiSelect(
       if( dest.eDest==SRT_Output ){
         Select *pFirst = p;
         while( pFirst->pPrior ) pFirst = pFirst->pPrior;
+/* COMDB2 MODIFICATION */
+/* I need this "bug" to return "wrong" types for comdb2sql */
+#ifdef SQLITE_BUILDING_FOR_COMDB2
+        generateColumnNames(pParse, 0, pFirst->pEList);
+#else
         generateColumnNames(pParse, pFirst->pSrc, pFirst->pEList);
+#endif
       }
       iBreak = sqlite3VdbeMakeLabel(v);
       iCont = sqlite3VdbeMakeLabel(v);
@@ -3081,7 +3161,13 @@ static int multiSelectOrderBy(
   if( pDest->eDest==SRT_Output ){
     Select *pFirst = pPrior;
     while( pFirst->pPrior ) pFirst = pFirst->pPrior;
+/* COMDB2 MODIFICATION */
+/* I need this "bug" to return "wrong" types for comdb2sql */
+#ifdef SQLITE_BUILDING_FOR_COMDB2
+    generateColumnNames(pParse, 0, pFirst->pEList);
+#else
     generateColumnNames(pParse, pFirst->pSrc, pFirst->pEList);
+#endif
   }
 
   /* Reassembly the compound query so that it will be freed correctly
@@ -4245,7 +4331,8 @@ static int selectExpander(Walker *pWalker, Select *p){
   /* Make sure cursor numbers have been assigned to all entries in
   ** the FROM clause of the SELECT statement.
   */
-  sqlite3SrcListAssignCursors(pParse, pTabList);
+  /* COMDB2 MODIFICATION */
+  sqlite3SrcListAssignCursors(pParse, pTabList, p->op == TK_SELECTV || p->recording);
 
   /* Look up every table named in the FROM clause of the select.  If
   ** an entry of the FROM clause is a subquery instead of a table or view,
@@ -5176,6 +5263,7 @@ int sqlite3Select(
     }
     if( sSort.pOrderBy ){
       sSort.nOBSat = sqlite3WhereIsOrdered(pWInfo);
+      sSort.bOrderedInnerLoop = sqlite3WhereOrderedInnerLoop(pWInfo);
       if( sSort.nOBSat==sSort.pOrderBy->nExpr ){
         sSort.pOrderBy = 0;
       }
@@ -5527,6 +5615,11 @@ int sqlite3Select(
         int iRoot = pTab->tnum;              /* Root page of scanned b-tree */
 
         sqlite3CodeVerifySchema(pParse, iDb);
+
+        /* COMDB2 MODIFICATION */
+        if (iDb != 1)
+            sqlite3VdbeAddTable(v, pTab);
+
         sqlite3TableLock(pParse, iDb, pTab->tnum, 0, pTab->zName);
 
         /* Search for the index that has the lowest scan cost.
@@ -5540,6 +5633,7 @@ int sqlite3Select(
         */
         if( !HasRowid(pTab) ) pBest = sqlite3PrimaryKeyIndex(pTab);
         for(pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext){
+        /* TODO: check why different in trunk comdb2 */
           if( pIdx->bUnordered==0
            && pIdx->szIdxRow<pTab->szTabRow
            && pIdx->pPartIdxWhere==0
@@ -5554,7 +5648,14 @@ int sqlite3Select(
         }
 
         /* Open a read-only cursor, execute the OP_Count, close the cursor. */
-        sqlite3VdbeAddOp4Int(v, OP_OpenRead, iCsr, iRoot, iDb, 1);
+        /* TODO: use op4 ? COMDB2 MODIFICATION */
+        if(p->op == TK_SELECTV || p->recording) {
+            /* sqlite3VdbeAddOp3(v, OP_OpenRead_Record, iCsr, iRoot, iDb); */
+            sqlite3VdbeAddOp4Int(v, OP_OpenRead_Record, iCsr, iRoot, iDb, 1);
+        } 
+        else {
+            sqlite3VdbeAddOp4Int(v, OP_OpenRead, iCsr, iRoot, iDb, 1);
+        }
         if( pKeyInfo ){
           sqlite3VdbeChangeP4(v, -1, (char *)pKeyInfo, P4_KEYINFO);
         }

@@ -312,6 +312,8 @@ void sqlite3Pragma(
   Vdbe *v = sqlite3GetVdbe(pParse);  /* Prepared statement */
   const struct sPragmaNames *pPragma;
 
+  if( pParse->explain != 0 ) return;
+
   if( v==0 ) return;
   sqlite3VdbeRunOnlyOnce(v);
   pParse->nMem = 2;

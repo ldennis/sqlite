@@ -97,6 +97,8 @@
 # define SHELL_USE_LOCAL_GETLINE 1
 #endif
 
+/* COMDB2 MODIFICATION */
+#include "sqliteInt.h"
 
 #if defined(_WIN32) || defined(WIN32)
 # include <io.h>
@@ -701,7 +703,9 @@ static const char *modeDescr[] = {
 /*
 ** Number of elements in an array
 */
+#ifndef ArraySize
 #define ArraySize(X)  (int)(sizeof(X)/sizeof(X[0]))
+#endif
 
 /*
 ** A callback for the sqlite3_log() interface.
@@ -5231,6 +5235,13 @@ int SQLITE_CDECL wmain(int argc, wchar_t **wargv){
     exit(1);
   }
 #endif
+
+  /* COMDB2 MODIFICATION */
+  sqlite3_tunables_init();
+
+  setBinaryMode(stdin);
+  setvbuf(stderr, 0, _IONBF, 0); /* Make sure stderr is unbuffered */
+  Argv0 = argv[0];
   main_init(&data);
 #if !SQLITE_SHELL_IS_UTF8
   sqlite3_initialize();

@@ -72,13 +72,16 @@ void sqlite3ColumnDefault(Vdbe *v, Table *pTab, int i, int iReg){
       sqlite3VdbeChangeP4(v, -1, (const char *)pValue, P4_MEM);
     }
 #ifndef SQLITE_OMIT_FLOATING_POINT
-    if( pTab->aCol[i].affinity==SQLITE_AFF_REAL ){
+    /* COMDB2 MODIFICATION */
+    if( iReg >= 0 && (pTab->aCol[i].affinity==SQLITE_AFF_REAL ||
+         pTab->aCol[i].affinity==SQLITE_AFF_SMALL) ){
       sqlite3VdbeAddOp1(v, OP_RealAffinity, iReg);
     }
 #endif
   }
 }
 
+extern int gbl_partial_indexes;
 /*
 ** Process an UPDATE statement.
 **
@@ -280,7 +283,8 @@ void sqlite3Update(
   */
   for(j=0, pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext, j++){
     int reg;
-    if( chngKey || hasFK || pIdx->pPartIdxWhere || pIdx==pPk ){
+    /* COMDB2 MODIFICATION */
+    if( chngKey || hasFK || (gbl_partial_indexes&&pTab->hasPartIdx) /*pIdx->pPartIdxWhere*/ || pIdx==pPk ){
       reg = ++pParse->nMem;
     }else{
       reg = 0;
@@ -299,6 +303,12 @@ void sqlite3Update(
   /* Begin generating code. */
   v = sqlite3GetVdbe(pParse);
   if( v==0 ) goto update_cleanup;
+
+  /*
+   * Comdb2 modification: create our updCols array.
+   */
+  sqlite3CreateUpdCols(v, db, pTab->nCol, aXRef);
+
   if( pParse->nested==0 ) sqlite3VdbeCountChanges(v);
   sqlite3BeginWriteOperation(pParse, 1, iDb);
 
@@ -432,6 +442,8 @@ void sqlite3Update(
       if( aiCurOnePass[0]>=0 ) aToOpen[aiCurOnePass[0]-iBaseCur] = 0;
       if( aiCurOnePass[1]>=0 ) aToOpen[aiCurOnePass[1]-iBaseCur] = 0;
     }
+    /* COMDB2 MODIFICATION */
+    /* AZ: if i dont call, i get a segfault */
     sqlite3OpenTableAndIndices(pParse, pTab, OP_OpenWrite, 0, iBaseCur, aToOpen,
                                0, 0);
   }
@@ -658,12 +670,16 @@ void sqlite3Update(
   sqlite3VdbeResolveLabel(v, labelBreak);
 
   /* Close all tables */
-  for(i=0, pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext, i++){
-    assert( aRegIdx );
-    if( aToOpen[i+1] ){
-      sqlite3VdbeAddOp2(v, OP_Close, iIdxCur+i, 0);
+  /* COMDB2 MODIFICATION */
+  if ( gbl_partial_indexes && pTab->hasPartIdx ){
+    for(i=0, pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext, i++){
+      assert( aRegIdx );
+      if( aToOpen[i+1] ){
+        sqlite3VdbeAddOp2(v, OP_Close, iIdxCur+i, 0);
+      }
     }
   }
+
   if( iDataCur<iIdxCur ) sqlite3VdbeAddOp2(v, OP_Close, iDataCur, 0);
 
   /* Update the sqlite_sequence table by storing the content of the

@@ -18,6 +18,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* COMDB2 MODIFICATION */
+int sqlite3IsComdb2Rowid(const char *);
+int sqlite3IsComdb2RowTimestamp(const char *);
+
 /*
 ** Walk the expression tree pExpr and increase the aggregate function
 ** depth (the Expr.op2 field) by N on every TK_AGG_FUNCTION node.
@@ -364,6 +368,24 @@ static int lookupName(
       cnt = 1;
       pExpr->iColumn = -1;
       pExpr->affinity = SQLITE_AFF_INTEGER;
+    }
+ 
+    /* COMDB2 MODIFICATION.
+       if it's a "comdb2_rowid" set a magic -2 for the column (instead of
+       the usual magic -1 for a "rowid."  inside of sqlite3exprcode we sniff
+       this out, and when we see a -2, we add a properly formulated
+       instruction (OP_Rowid with P3==1 (instead of the usual 0).
+       the vm sniffs this out when it runs OP_Rowid and executes the comdb2
+       backend call to get the rrn+genid.
+       */
+    else if( cnt==0 && cntTab==1 && sqlite3IsComdb2Rowid(zCol) ){
+       cnt = 1;
+       pExpr->iColumn = -2;
+       pExpr->affinity = SQLITE_AFF_TEXT;
+    }else if( cnt==0 && cntTab==1 && sqlite3IsComdb2RowTimestamp(zCol) ){
+       cnt = 1;
+       pExpr->iColumn = -3;
+       pExpr->affinity = SQLITE_AFF_TEXT;
     }
 
     /*
@@ -752,6 +774,8 @@ static int resolveExprStep(Walker *pWalker, Expr *pExpr){
     }
 #ifndef SQLITE_OMIT_SUBQUERY
     case TK_SELECT:
+    /* COMDB2 MODIFICATION */
+    case TK_SELECTV:
     case TK_EXISTS:  testcase( pExpr->op==TK_EXISTS );
 #endif
     case TK_IN: {

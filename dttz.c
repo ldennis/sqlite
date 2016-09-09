@@ -67,6 +67,7 @@ void register_date_functions(sqlite3 * db) {
         { "days",      2, daysFunc         , NULL, NULL},
 
         { "now",       0, nowFunc          , NULL, NULL},
+        { "now",       1, nowFunc          , NULL, NULL},
         { "months",    1, monthsFunc       , NULL, NULL},
     };
     int rc;
@@ -320,8 +321,27 @@ static void nowFunc(sqlite3_context *context, int argc, sqlite3_value **argv)
 {
    struct timespec *tspec;
    dttz_t dt;
+   int precision = 0;
+   const unsigned char *msus;
    assert(context->pVdbe);
-   timespec_to_dttz(&context->pVdbe->tspec, &dt);
+
+   if (argc == 0)
+       precision = context->pVdbe->dtprec;
+   else if (SQLITE_INTEGER == sqlite3_value_type(argv[0]))
+       precision = sqlite3_value_int(argv[0]);
+   else if (SQLITE_TEXT == sqlite3_value_type(argv[0])) {
+       msus = sqlite3_value_text(argv[0]);
+       DTTZ_TEXT_TO_PREC(msus, precision, 0, goto err);
+   }
+
+   if (precision != DTTZ_PREC_MSEC
+           && precision != DTTZ_PREC_USEC) {
+err:
+       sqlite3_result_error(context, "incorrect precision", -1);
+       return;
+   }
+
+   timespec_to_dttz(&context->pVdbe->tspec, &dt, precision);
    /*
       there is no way yet to provide the timezone here w/out a gross hack
       instead we let the next function or cast applied to this to set the right

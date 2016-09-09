@@ -1059,6 +1059,9 @@ void sqlite3_log(int iErrCode, const char *zFormat, ...){
   }
 }
 
+/* COMDB2 MODIFICATION */
+/* Use the one in io_override */
+#if 0
 #if defined(SQLITE_DEBUG) || defined(SQLITE_HAVE_OS_TRACE)
 /*
 ** A version of printf() that understands %lld.  Used for debugging.
@@ -1079,6 +1082,7 @@ void sqlite3DebugPrintf(const char *zFormat, ...){
 }
 #endif
 
+#endif
 
 /*
 ** variable-argument wrapper around sqlite3VXPrintf().  The bFlags argument

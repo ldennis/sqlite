@@ -978,7 +978,11 @@ static void exprAnalyze(
       testcase( (prereqLeft | extraRight) != prereqLeft );
       pNew->prereqRight = prereqLeft | extraRight;
       pNew->prereqAll = prereqAll;
-      pNew->eOperator = (operatorMask(pDup->op) + eExtraOp) & opMask;
+      /* Lingzhi: upgrade to ISNULL?? */
+      if ( pLeft->op==TK_NULL && op==TK_IS ) 
+        pNew->eOperator = WO_ISNULL & opMask;
+      else
+        pNew->eOperator = (operatorMask(pDup->op) + eExtraOp) & opMask;
     }
   }
 

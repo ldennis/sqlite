@@ -33,6 +33,31 @@ typedef struct Vdbe Vdbe;
 typedef struct Mem Mem;
 typedef struct SubProgram SubProgram;
 
+/****************** COMDB2 CUSTOM *************************************/
+
+#define DEFAULT_OPFUNC_BUFLEN 512
+  typedef struct OpFunc OpFunc;
+
+  typedef  int (*vdbeFunc)(OpFunc* arg); // Used to refer to an external function;
+  typedef  int (*vdbeFuncArgFree) (OpFunc* arg); 
+
+  struct OpFunc {
+    vdbeFunc func;
+    vdbeFuncArgFree destructor;
+    int     int_arg;
+    void*   arg;
+    char*   buf;
+    char*   end;
+    char*   readNext;
+    char*   writeNext;
+    int     len;
+    int     rc;
+    char*   errorMsg;
+  };
+
+ 
+/***************************************************************/
+
 /*
 ** A single instruction of the virtual machine has an opcode
 ** and as many as three operands.  The instruction is recorded
@@ -60,9 +85,11 @@ struct VdbeOp {
     KeyInfo *pKeyInfo;     /* Used when p4type is P4_KEYINFO */
     int *ai;               /* Used when p4type is P4_INTARRAY */
     SubProgram *pProgram;  /* Used when p4type is P4_SUBPROGRAM */
+    OpFunc *comdb2func;    /* COMDB2 Operator to Function P4_OPFUNC */
     Table *pTab;           /* Used when p4type is P4_TABLE */
+
 #ifdef SQLITE_ENABLE_CURSOR_HINTS
-    Expr *pExpr;           /* Used when p4type is P4_EXPR */
+    Expr *pExpr;           /* COMDB2: Used when p4type is P4_EXPR */
 #endif
     int (*xAdvance)(BtCursor *, int *);
   } p4;
@@ -114,7 +141,7 @@ typedef struct VdbeOpList VdbeOpList;
 #define P4_COLLSEQ  (-4)  /* P4 is a pointer to a CollSeq structure */
 #define P4_FUNCDEF  (-5)  /* P4 is a pointer to a FuncDef structure */
 #define P4_KEYINFO  (-6)  /* P4 is a pointer to a KeyInfo structure */
-#define P4_EXPR     (-7)  /* P4 is a pointer to an Expr tree */
+#define P4_EXPR     (-7)  /* COMDB2: P4 is a pointer to an Expr tree */
 #define P4_MEM      (-8)  /* P4 is a pointer to a Mem*    structure */
 #define P4_TRANSIENT  0   /* P4 is a pointer to a transient string */
 #define P4_VTAB     (-10) /* P4 is a pointer to an sqlite3_vtab structure */
@@ -127,6 +154,8 @@ typedef struct VdbeOpList VdbeOpList;
 #define P4_ADVANCE  (-19) /* P4 is a pointer to BtreeNext() or BtreePrev() */
 #define P4_TABLE    (-20) /* P4 is a pointer to a Table structure */
 #define P4_FUNCCTX  (-21) /* P4 is a pointer to an sqlite3_context object */
+
+#define P4_OPFUNC  (-20) /* P4 is a COMDB2 custom function */
 
 /* Error message codes for OP_Halt */
 #define P5_ConstraintNotNull 1
@@ -190,6 +219,7 @@ void sqlite3VdbeEndCoroutine(Vdbe*,int);
 #endif
 VdbeOp *sqlite3VdbeAddOpList(Vdbe*, int nOp, VdbeOpList const *aOp, int iLineno);
 void sqlite3VdbeAddParseSchemaOp(Vdbe*,int,char*);
+void sqlite3VdbeAddTable(Vdbe*,Table*);
 void sqlite3VdbeChangeOpcode(Vdbe*, u32 addr, u8);
 void sqlite3VdbeChangeP1(Vdbe*, u32 addr, int P1);
 void sqlite3VdbeChangeP2(Vdbe*, u32 addr, int P2);
@@ -217,6 +247,8 @@ int sqlite3VdbeCurrentAddr(Vdbe*);
 void sqlite3VdbeResetStepResult(Vdbe*);
 void sqlite3VdbeRewind(Vdbe*);
 int sqlite3VdbeReset(Vdbe*);
+/* COMDB2 Modification. */
+int sqlite3VdbeResetClock(Vdbe*);
 void sqlite3VdbeSetNumCols(Vdbe*,int);
 int sqlite3VdbeSetColName(Vdbe*, int, int, const char *, void(*)(void*));
 void sqlite3VdbeCountChanges(Vdbe*);
@@ -229,14 +261,14 @@ void sqlite3VdbeSetVarmask(Vdbe*, int);
 #ifndef SQLITE_OMIT_TRACE
   char *sqlite3VdbeExpandSql(Vdbe*, const char*);
 #endif
-int sqlite3MemCompare(const Mem*, const Mem*, const CollSeq*);
+static inline int sqlite3MemCompare(const Mem*, const Mem*, const CollSeq*);
 
 void sqlite3VdbeRecordUnpack(KeyInfo*,int,const void*,UnpackedRecord*);
-int sqlite3VdbeRecordCompare(int,const void*,UnpackedRecord*);
-int sqlite3VdbeRecordCompareWithSkip(int, const void *, UnpackedRecord *, int);
+static inline int sqlite3VdbeRecordCompare(int,const void*,UnpackedRecord*);
+static inline int sqlite3VdbeRecordCompareWithSkip(int, const void *, UnpackedRecord *, int);
 UnpackedRecord *sqlite3VdbeAllocUnpackedRecord(KeyInfo *, char *, int, char **);
 
-typedef int (*RecordCompare)(int,const void*,UnpackedRecord*);
+typedef int (*RecordCompare)(int,const void*,UnpackedRecord*,int);
 RecordCompare sqlite3VdbeFindCompare(UnpackedRecord*);
 
 #ifndef SQLITE_OMIT_TRIGGER

@@ -13,6 +13,7 @@
 ** to handle INSERT statements in SQLite.
 */
 #include "sqliteInt.h"
+extern int gbl_partial_indexes;
 
 /*
 ** Generate code that will 
@@ -36,6 +37,15 @@ void sqlite3OpenTable(
   assert( opcode==OP_OpenWrite || opcode==OP_OpenRead );
   sqlite3TableLock(pParse, iDb, pTab->tnum, 
                    (opcode==OP_OpenWrite)?1:0, pTab->zName);
+  /* COMDB2 MODIFICATION */
+  /* if we are handling a SELECTV, we generate a new opcode so that we 
+     know to open recording BtCursors at runtime
+  */
+  /* TODO: AZ: is this opcode ok for both parts of the if below? */
+  if( GET_CURSOR_RECORDING(pParse, iCur) ){
+    opcode = OP_OpenRead_Record;
+  }
+
   if( HasRowid(pTab) ){
     sqlite3VdbeAddOp4Int(v, opcode, iCur, pTab->tnum, iDb, pTab->nCol);
     VdbeComment((v, "%s", pTab->zName));
@@ -47,6 +57,11 @@ void sqlite3OpenTable(
     sqlite3VdbeSetP4KeyInfo(pParse, pPk);
     VdbeComment((v, "%s", pTab->zName));
   }
+
+  /* COMDB2: Open Cursor locks the table, verify cookie after we have opened the cursor */
+  if (iDb != 1)
+      sqlite3VdbeAddTable(v,pTab);
+
 }
 
 /*
@@ -993,7 +1008,7 @@ void sqlite3Insert(
     }else
 #endif
     {
-      int isReplace;    /* Set to true if constraints may cause a replace */
+      int isReplace = 0;    /* Set to true if constraints may cause a replace */
       sqlite3GenerateConstraintChecks(pParse, pTab, aRegIdx, iDataCur, iIdxCur,
           regIns, 0, ipkColumn>=0, onError, endOfLoop, &isReplace, 0
       );
@@ -1031,8 +1046,11 @@ void sqlite3Insert(
   if( !IsVirtual(pTab) && !isView ){
     /* Close all tables opened */
     if( iDataCur<iIdxCur ) sqlite3VdbeAddOp1(v, OP_Close, iDataCur);
-    for(idx=0, pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext, idx++){
-      sqlite3VdbeAddOp1(v, OP_Close, idx+iIdxCur);
+    /* COMDB2 MODIFICATION */
+    if( gbl_partial_indexes && pTab->hasPartIdx ){
+      for(idx=0, pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext, idx++){
+        sqlite3VdbeAddOp1(v, OP_Close, idx+iIdxCur);
+      }
     }
   }
 
@@ -1244,6 +1262,10 @@ void sqlite3GenerateConstraintChecks(
   u8 bAffinityDone = 0;  /* True if the OP_Affinity operation has been run */
   int regRowid = -1;   /* Register holding ROWID value */
 
+  /* COMDB2 MODIFICATION */
+  if( !gbl_partial_indexes || !pTab->hasPartIdx )
+    return;
+
   isUpdate = regOldData!=0;
   db = pParse->db;
   v = sqlite3GetVdbe(pParse);
@@ -1269,6 +1291,8 @@ void sqlite3GenerateConstraintChecks(
 
   /* Test all NOT NULL constraints.
   */
+ 
+  /* from now on, stop checking for null constraints while sql */
   for(i=0; i<nCol; i++){
     if( i==pTab->iPKey ){
       continue;        /* ROWID is never NULL */
@@ -1431,7 +1455,7 @@ void sqlite3GenerateConstraintChecks(
         if( pTrigger || sqlite3FkRequired(pParse, pTab, 0, 0) ){
           sqlite3MultiWrite(pParse);
           sqlite3GenerateRowDelete(pParse, pTab, pTrigger, iDataCur, iIdxCur,
-                                   regNewData, 1, 0, OE_Replace, 1, -1);
+                                   regNewData, 1, 0, OE_Replace, ONEPASS_SINGLE, -1);
         }else{
 #ifdef SQLITE_ENABLE_PREUPDATE_HOOK
           if( HasRowid(pTab) ){
@@ -1676,21 +1700,24 @@ void sqlite3CompleteInsertion(
   v = sqlite3GetVdbe(pParse);
   assert( v!=0 );
   assert( pTab->pSelect==0 );  /* This table is not a VIEW */
-  for(i=0, pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext, i++){
-    if( aRegIdx[i]==0 ) continue;
-    bAffinityDone = 1;
-    if( pIdx->pPartIdxWhere ){
-      sqlite3VdbeAddOp2(v, OP_IsNull, aRegIdx[i], sqlite3VdbeCurrentAddr(v)+2);
-      VdbeCoverage(v);
+  /* COMDB2 MODIFICATION */
+  if( gbl_partial_indexes && pTab->hasPartIdx ){
+    for(i=0, pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext, i++){
+      if( aRegIdx[i]==0 ) continue;
+      bAffinityDone = 1;
+      if( pIdx->pPartIdxWhere ){
+        sqlite3VdbeAddOp2(v, OP_IsNull, aRegIdx[i], sqlite3VdbeCurrentAddr(v)+2);
+        VdbeCoverage(v);
+      }
+      sqlite3VdbeAddOp2(v, OP_IdxInsert, iIdxCur+i, aRegIdx[i]);
+      pik_flags = 0;
+      if( useSeekResult ) pik_flags = OPFLAG_USESEEKRESULT;
+      if( IsPrimaryKeyIndex(pIdx) && !HasRowid(pTab) ){
+        assert( pParse->nested==0 );
+        pik_flags |= OPFLAG_NCHANGE;
+      }
+      sqlite3VdbeChangeP5(v, pik_flags);
     }
-    sqlite3VdbeAddOp2(v, OP_IdxInsert, iIdxCur+i, aRegIdx[i]);
-    pik_flags = 0;
-    if( useSeekResult ) pik_flags = OPFLAG_USESEEKRESULT;
-    if( IsPrimaryKeyIndex(pIdx) && !HasRowid(pTab) ){
-      assert( pParse->nested==0 );
-      pik_flags |= OPFLAG_NCHANGE;
-    }
-    sqlite3VdbeChangeP5(v, pik_flags);
   }
   if( !HasRowid(pTab) ) return;
   regData = regNewData + 1;
@@ -1774,20 +1801,24 @@ int sqlite3OpenTableAndIndices(
     sqlite3TableLock(pParse, iDb, pTab->tnum, op==OP_OpenWrite, pTab->zName);
   }
   if( piIdxCur ) *piIdxCur = iBase;
-  for(i=0, pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext, i++){
-    int iIdxCur = iBase++;
-    assert( pIdx->pSchema==pTab->pSchema );
-    if( aToOpen==0 || aToOpen[i+1] ){
-      sqlite3VdbeAddOp3(v, op, iIdxCur, pIdx->tnum, iDb);
-      sqlite3VdbeSetP4KeyInfo(pParse, pIdx);
-      VdbeComment((v, "%s", pIdx->zName));
-    }
-    if( IsPrimaryKeyIndex(pIdx) && !HasRowid(pTab) ){
-      if( piDataCur ) *piDataCur = iIdxCur;
-    }else{
-      sqlite3VdbeChangeP5(v, p5);
+  /* COMDB2 MODIFICATION */
+  if( gbl_partial_indexes && pTab->hasPartIdx ){
+    for(i=0, pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext, i++){
+      int iIdxCur = iBase++;
+      assert( pIdx->pSchema==pTab->pSchema );
+      if( aToOpen==0 || aToOpen[i+1] ){
+        sqlite3VdbeAddOp3(v, op, iIdxCur, pIdx->tnum, iDb);
+        sqlite3VdbeSetP4KeyInfo(pParse, pIdx);
+        VdbeComment((v, "%s", pIdx->zName));
+      }
+      if( IsPrimaryKeyIndex(pIdx) && !HasRowid(pTab) ){
+        if( piDataCur ) *piDataCur = iIdxCur;
+      }else{
+        sqlite3VdbeChangeP5(v, p5);
+      }
     }
   }
+
   if( iBase>pParse->nTab ) pParse->nTab = iBase;
   return i;
 }

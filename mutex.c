@@ -118,6 +118,7 @@ void sqlite3_mutex_free(sqlite3_mutex *p){
 ** Obtain the mutex p. If some other thread already has the mutex, block
 ** until it can be obtained.
 */
+/* in COMDB2 this is a void operation */
 void sqlite3_mutex_enter(sqlite3_mutex *p){
   if( p ){
     assert( sqlite3GlobalConfig.mutex.xMutexEnter );

@@ -23,6 +23,10 @@
 ** in the common case, they are usually small and no file I/O needs to
 ** occur.
 */
+
+/* COMDB2 MODIFICATION */
+static int i_am_not_an_empty_file;
+
 #include "sqliteInt.h"
 
 /* Forward references to internal structures */

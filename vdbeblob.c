@@ -68,7 +68,7 @@ static int blobSeekToRow(Incrblob *p, sqlite3_int64 iRow, char **pzErr){
   if( rc==SQLITE_ROW ){
     VdbeCursor *pC = v->apCsr[0];
     u32 type = pC->aType[p->iCol];
-    if( type<12 ){
+    if( sqlite3IsFixedLengthSerialType(type) ){
       zErr = sqlite3MPrintf(p->db, "cannot open value of type %s",
           type==0?"null": type==7?"real": "integer"
       );

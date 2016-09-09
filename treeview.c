@@ -18,7 +18,7 @@
 ** with SQLITE_DEBUG.
 */
 #include "sqliteInt.h"
-#ifdef SQLITE_DEBUG
+#ifdef SQLITE_BUILDING_FOR_COMDB2
 
 /*
 ** Add a new subitem to the tree.  The moreToFollow flag indicates that this

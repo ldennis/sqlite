@@ -80,6 +80,8 @@ struct Testvfs {
   sqlite3_vfs *pVfs;              /* The testvfs registered with SQLite */
   Tcl_Interp *interp;             /* Interpreter to run script in */
   Tcl_Obj *pScript;               /* Script to execute */
+  int nScript;                    /* Number of elements in array apScript */
+  Tcl_Obj **apScript;             /* Array version of pScript */
   TestvfsBuffer *pBuffer;         /* List of shared buffers */
   int isNoshm;
   int isFullshm;
@@ -278,14 +280,43 @@ static void tvfsExecTcl(
   Tcl_Obj *arg4
 ){
   int rc;                         /* Return code from Tcl_EvalObj() */
-  Tcl_Obj *pEval;
+  int nArg;                       /* Elements in eval'd list */
+  int nScript;
+  Tcl_Obj ** ap;
+
   assert( p->pScript );
 
+  /* TODO: not in COMDB2 */
   assert( zMethod );
   assert( p );
   assert( arg2==0 || arg1!=0 );
   assert( arg3==0 || arg2!=0 );
 
+  /* COMDB2 */
+  if( !p->apScript ){
+    int nByte;
+    int i;
+    if( TCL_OK!=Tcl_ListObjGetElements(p->interp, p->pScript, &nScript, &ap) ){
+      Tcl_BackgroundError(p->interp);
+      Tcl_ResetResult(p->interp);
+      return;
+    }
+    p->nScript = nScript;
+    nByte = (nScript+TESTVFS_MAX_ARGS)*sizeof(Tcl_Obj *);
+    p->apScript = (Tcl_Obj **)ckalloc(nByte);
+    memset(p->apScript, 0, nByte);
+    for(i=0; i<nScript; i++){
+      p->apScript[i] = ap[i];
+    }
+  }
+
+  p->apScript[p->nScript] = Tcl_NewStringObj(zMethod, -1);
+  p->apScript[p->nScript+1] = arg1;
+  p->apScript[p->nScript+2] = arg2;
+  p->apScript[p->nScript+3] = arg3;
+  /* TODO: p->apScript[p->nScript+4] = arg4; */
+
+  /* TODO: not in COMDB2 */
   pEval = Tcl_DuplicateObj(p->pScript);
   Tcl_IncrRefCount(p->pScript);
   Tcl_ListObjAppendElement(p->interp, pEval, Tcl_NewStringObj(zMethod, -1));
@@ -294,10 +325,22 @@ static void tvfsExecTcl(
   if( arg3 ) Tcl_ListObjAppendElement(p->interp, pEval, arg3);
   if( arg4 ) Tcl_ListObjAppendElement(p->interp, pEval, arg4);
 
-  rc = Tcl_EvalObjEx(p->interp, pEval, TCL_EVAL_GLOBAL);
+  /* COMDB2 */
+  for(nArg=p->nScript; p->apScript[nArg]; nArg++){
+    Tcl_IncrRefCount(p->apScript[nArg]);
+  }
+
+  /* sqlite: rc = Tcl_EvalObjEx(p->interp, pEval, TCL_EVAL_GLOBAL); */
+  /* COMDB2 */
+  rc = Tcl_EvalObjv(p->interp, nArg, p->apScript, TCL_EVAL_GLOBAL);
   if( rc!=TCL_OK ){
     Tcl_BackgroundError(p->interp);
     Tcl_ResetResult(p->interp);
+  }
+
+  for(nArg=p->nScript; p->apScript[nArg]; nArg++){
+    Tcl_DecrRefCount(p->apScript[nArg]);
+    p->apScript[nArg] = 0;
   }
 }
 
@@ -1197,6 +1240,9 @@ static int testvfs_obj_cmd(
         int nByte;
         if( p->pScript ){
           Tcl_DecrRefCount(p->pScript);
+          ckfree((char *)p->apScript);
+          p->apScript = 0;
+          p->nScript = 0;
           p->pScript = 0;
         }
         Tcl_GetStringFromObj(objv[2], &nByte);
@@ -1352,6 +1398,7 @@ static void testvfs_obj_del(ClientData cd){
   Testvfs *p = (Testvfs *)cd;
   if( p->pScript ) Tcl_DecrRefCount(p->pScript);
   sqlite3_vfs_unregister(p->pVfs);
+  ckfree((char *)p->apScript);
   ckfree((char *)p->pVfs);
   ckfree((char *)p);
 }

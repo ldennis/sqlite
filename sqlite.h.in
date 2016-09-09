@@ -433,6 +433,10 @@ int sqlite3_exec(
 #define SQLITE_WARNING     28   /* Warnings from sqlite3_log() */
 #define SQLITE_ROW         100  /* sqlite3_step() has another row ready */
 #define SQLITE_DONE        101  /* sqlite3_step() has finished executing */
+/* COMDB2 MODIFICATION */
+#define SQLITE_DEADLOCK    200  /* deadlock happened, transaction aborted */
+#define SQLITE_ACCESS      201  /* failed permissions */
+#define SQLITE_LIMIT       202  /* query hit configured max cost */
 /* end-of-error-codes */
 
 /*
@@ -3397,6 +3401,19 @@ int sqlite3_prepare16_v2(
   const void **pzTail     /* OUT: Pointer to unused portion of zSql */
 );
 
+/* COMDB2 MODIFICATION */
+enum {
+    SQLITE3_ENABLE_QUERY_PLAN = 1
+};
+
+int sqlite3_prepare_flags(
+  sqlite3 *db,
+  const char *zSql,
+  int nBytes,
+  sqlite3_stmt **ppStmt,
+  const char** pzTail,
+  int flags);
+
 /*
 ** CAPI3REF: Retrieving Statement SQL
 ** METHOD: sqlite3_stmt
@@ -3635,6 +3652,9 @@ int sqlite3_bind_text64(sqlite3_stmt*, int, const char*, sqlite3_uint64,
                          void(*)(void*), unsigned char encoding);
 int sqlite3_bind_value(sqlite3_stmt*, int, const sqlite3_value*);
 int sqlite3_bind_zeroblob(sqlite3_stmt*, int, int n);
+/* COMDB2 MODIFICATION */
+int sqlite3_bind_datetime(sqlite3_stmt *pStmt, int i, dttz_t dt, char *tz);
+int sqlite3_bind_interval(sqlite3_stmt *pStmt, int i, intv_t it);
 int sqlite3_bind_zeroblob64(sqlite3_stmt*, int, sqlite3_uint64);
 
 /*
@@ -3724,6 +3744,18 @@ int sqlite3_clear_bindings(sqlite3_stmt*);
 ** See also: [sqlite3_data_count()]
 */
 int sqlite3_column_count(sqlite3_stmt *pStmt);
+
+/* COMDB2 MODIFICATION */
+const void *sqlite3_value_datetime(sqlite3_value *pVal);
+
+/* COMDB2 MODIFICATION */
+void sqlite3_result_datetime(sqlite3_context *pCtx, sqlite3_value *pValue);
+
+/* COMDB2 MODIFICATION */
+const void *sqlite3_column_datetime(sqlite3_stmt *pStmt, int i);
+
+/* COMDB2 MODIFICATION */
+const void *sqlite3_column_interval(sqlite3_stmt *pStmt, int i, int type);
 
 /*
 ** CAPI3REF: Column Names In A Result Set
@@ -3974,6 +4006,14 @@ int sqlite3_data_count(sqlite3_stmt *pStmt);
 #endif
 #define SQLITE3_TEXT     3
 
+/* COMDB2 MODIFICATION */
+#define SQLITE_DATETIME       6
+#define SQLITE_INTERVAL_YM    7
+#define SQLITE_INTERVAL_DS    8
+#define SQLITE_DATETIMEH      9
+#define SQLITE_INTERVAL_DSUS 10
+#define SQLITE_DECIMAL       11
+
 /*
 ** CAPI3REF: Result Values From A Query
 ** KEYWORDS: {column access functions}
@@ -4195,6 +4235,12 @@ int sqlite3_finalize(sqlite3_stmt *pStmt);
 ** of any [sqlite3_bind_blob|bindings] on the [prepared statement] S.
 */
 int sqlite3_reset(sqlite3_stmt *pStmt);
+
+/*
+** COMDB2 Modification: Reset tspec of Prepared Statement.
+**
+*/
+SQLITE_API int sqlite3_resetclock(sqlite3_stmt *pStmt);
 
 /*
 ** CAPI3REF: Create Or Redefine SQL Functions
@@ -4741,6 +4787,8 @@ void sqlite3_result_text16le(sqlite3_context*, const void*, int,void(*)(void*));
 void sqlite3_result_text16be(sqlite3_context*, const void*, int,void(*)(void*));
 void sqlite3_result_value(sqlite3_context*, sqlite3_value*);
 void sqlite3_result_zeroblob(sqlite3_context*, int n);
+SQLITE_API void sqlite3_result_datetime(sqlite3_context*, sqlite3_value*);
+SQLITE_API void sqlite3_result_interval(sqlite3_context*, intv_t*);
 int sqlite3_result_zeroblob64(sqlite3_context*, sqlite3_uint64 n);
 
 
@@ -5461,6 +5509,9 @@ int sqlite3_table_column_metadata(
   int *pPrimaryKey,           /* OUTPUT: True if column part of PK */
   int *pAutoinc               /* OUTPUT: True if column is auto-increment */
 );
+
+/* COMDB2 MODIFICATION */
+char* sqlite3_prepare_plan(sqlite3_stmt *stmt);
 
 /*
 ** CAPI3REF: Load An Extension

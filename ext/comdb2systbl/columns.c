@@ -144,7 +144,7 @@ static int systblColumnsColumn(
       break;
     }
     case STCOL_TYPE: {
-      sqlite3_result_text(ctx, (char*) strtype(pField->type), -1, NULL);
+      sqlite3_result_text(ctx, csc2type(pField), -1, SQLITE_STATIC);
       break;
     }
     case STCOL_SIZE: {
@@ -152,9 +152,12 @@ static int systblColumnsColumn(
       break;
     }
     case STCOL_SQLTYPE: {
-      char buf[128]; /* Space for sqltype field */
+      char *stype;
 
-      sqlite3_result_text(ctx, sqltype(pField, buf, sizeof(buf)), -1, NULL);
+      /* sizeof("interval month") == 15 */
+      stype = sqlite3_malloc(15);
+      sqltype(pField, stype, 15);
+      sqlite3_result_text(ctx, stype, -1, sqlite3_free);
       break;
     }
     case STCOL_INLINESZ: {
@@ -169,8 +172,7 @@ static int systblColumnsColumn(
     case STCOL_DEFVAL: {
       if( pField->in_default ){
         char *x = sql_field_default_trans(pField, 0);
-        sqlite3_result_text(ctx, x, -1, NULL);
-        sqlite3_free(x);
+        sqlite3_result_text(ctx, x, -1, sqlite3_free);
       }else{
         sqlite3_result_null(ctx);
       }
@@ -179,15 +181,15 @@ static int systblColumnsColumn(
     case STCOL_DBLOAD: {
       if( pField->out_default ){
         char *x = sql_field_default_trans(pField, 1);
-        sqlite3_result_text(ctx, x, -1, NULL);
-        sqlite3_free(x);
+        sqlite3_result_text(ctx, x, -1, sqlite3_free);
       }else{
         sqlite3_result_null(ctx);
       }
       break;
     }
     case STCOL_ALLOWNULL: {
-      sqlite3_result_text(ctx, YESNO(!(pField->flags & NO_NULL)), -1, NULL);
+      sqlite3_result_text(ctx, YESNO(!(pField->flags & NO_NULL)),
+        -1, SQLITE_STATIC);
     }
   }
   return SQLITE_OK;

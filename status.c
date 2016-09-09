@@ -32,7 +32,7 @@ static SQLITE_WSD struct sqlite3StatType {
 
 /*
 ** Elements of sqlite3Stat[] are protected by either the memory allocator
-** mutex, or by the pcache1 mutex.  The following array determines which.
+** mutex.  The following array determines which.
 */
 static const char statMutex[] = {
   0,  /* SQLITE_STATUS_MEMORY_USED */
@@ -70,8 +70,6 @@ sqlite3_int64 sqlite3StatusValue(int op){
   wsdStatInit;
   assert( op>=0 && op<ArraySize(wsdStat.nowValue) );
   assert( op>=0 && op<ArraySize(statMutex) );
-  assert( sqlite3_mutex_held(statMutex[op] ? sqlite3Pcache1Mutex()
-                                           : sqlite3MallocMutex()) );
   return wsdStat.nowValue[op];
 }
 
@@ -90,8 +88,6 @@ void sqlite3StatusUp(int op, int N){
   wsdStatInit;
   assert( op>=0 && op<ArraySize(wsdStat.nowValue) );
   assert( op>=0 && op<ArraySize(statMutex) );
-  assert( sqlite3_mutex_held(statMutex[op] ? sqlite3Pcache1Mutex()
-                                           : sqlite3MallocMutex()) );
   wsdStat.nowValue[op] += N;
   if( wsdStat.nowValue[op]>wsdStat.mxValue[op] ){
     wsdStat.mxValue[op] = wsdStat.nowValue[op];
@@ -101,8 +97,6 @@ void sqlite3StatusDown(int op, int N){
   wsdStatInit;
   assert( N>=0 );
   assert( op>=0 && op<ArraySize(statMutex) );
-  assert( sqlite3_mutex_held(statMutex[op] ? sqlite3Pcache1Mutex()
-                                           : sqlite3MallocMutex()) );
   assert( op>=0 && op<ArraySize(wsdStat.nowValue) );
   wsdStat.nowValue[op] -= N;
 }
@@ -118,8 +112,6 @@ void sqlite3StatusHighwater(int op, int X){
   newValue = (sqlite3StatValueType)X;
   assert( op>=0 && op<ArraySize(wsdStat.nowValue) );
   assert( op>=0 && op<ArraySize(statMutex) );
-  assert( sqlite3_mutex_held(statMutex[op] ? sqlite3Pcache1Mutex()
-                                           : sqlite3MallocMutex()) );
   assert( op==SQLITE_STATUS_MALLOC_SIZE
           || op==SQLITE_STATUS_PAGECACHE_SIZE
           || op==SQLITE_STATUS_SCRATCH_SIZE
@@ -146,7 +138,7 @@ int sqlite3_status64(
 #ifdef SQLITE_ENABLE_API_ARMOR
   if( pCurrent==0 || pHighwater==0 ) return SQLITE_MISUSE_BKPT;
 #endif
-  pMutex = statMutex[op] ? sqlite3Pcache1Mutex() : sqlite3MallocMutex();
+  pMutex = sqlite3MallocMutex();
   sqlite3_mutex_enter(pMutex);
   *pCurrent = wsdStat.nowValue[op];
   *pHighwater = wsdStat.mxValue[op];
