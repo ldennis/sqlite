@@ -10,6 +10,7 @@ const sqlite3_module systblKeysModule;
 const sqlite3_module systblFieldsModule;
 const sqlite3_module systblConstraintsModule;
 const sqlite3_module systblTblSizeModule;
+const sqlite3_module systblSPsModule;
 
 /* Simple yes/no answer for booleans */
 #define YESNO(x) ((x) ? "Y" : "N")

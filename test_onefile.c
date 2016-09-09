@@ -508,7 +508,7 @@ static int fsSync(sqlite3_file *pFile, int flags){
   if( p->eType==DATABASE_FILE ){
     unsigned char zSize[4];
     zSize[0] = (pReal->nDatabase&0xFF000000)>>24;
-    zSize[1] = (pReal->nDatabase&0x00FF0000)>>16;
+    zSize[1] = (unsigned char)((pReal->nDatabase&0x00FF0000)>>16);
     zSize[2] = (pReal->nDatabase&0x0000FF00)>>8;
     zSize[3] = (pReal->nDatabase&0x000000FF);
     rc = pRealFile->pMethods->xWrite(pRealFile, zSize, 4, 0);
@@ -595,9 +595,9 @@ static int fsOpen(
   int rc = SQLITE_OK;
 
   if( 0==(flags&(SQLITE_OPEN_MAIN_DB|SQLITE_OPEN_MAIN_JOURNAL)) ){
-    tmp_file *p = (tmp_file *)pFile;
-    memset(p, 0, sizeof(*p));
-    p->base.pMethods = &tmp_io_methods;
+    tmp_file *p2 = (tmp_file *)pFile;
+    memset(p2, 0, sizeof(*p2));
+    p2->base.pMethods = &tmp_io_methods;
     return SQLITE_OK;
   }
 

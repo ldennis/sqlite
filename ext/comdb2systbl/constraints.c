@@ -171,12 +171,12 @@ static int systblConstraintsColumn(
     }
     case STCON_CDELETE: {
       sqlite3_result_text(ctx, YESNO(pConstraint->flags & CT_DEL_CASCADE), 
-        -1, NULL);
+        -1, SQLITE_STATIC);
       break;
     }
     case STCON_CUPDATE: {
       sqlite3_result_text(ctx, YESNO(pConstraint->flags & CT_UPD_CASCADE), 
-        -1, NULL);
+        -1, SQLITE_STATIC);
       break;
     }
   }

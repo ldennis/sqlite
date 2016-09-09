@@ -124,8 +124,14 @@ static malloc_zone_t* _sqliteZone_;
 ** routines.
 */
 static void *sqlite3MemMalloc(int nByte){
+  extern unsigned gbl_blob_sz_thresh_bytes;
+  extern comdb2bma blobmem;
 #ifdef SQLITE_MALLOCSIZE
-  void *p = SQLITE_MALLOC( nByte );
+  void *p;
+  if( nByte > gbl_blob_sz_thresh_bytes )
+    p = comdb2_bmalloc( blobmem, nByte );
+  else
+    p = SQLITE_MALLOC( nByte );
   if( p==0 ){
     testcase( sqlite3GlobalConfig.xLog!=0 );
     sqlite3_log(SQLITE_NOMEM, "failed to allocate %u bytes of memory", nByte);
@@ -135,7 +141,10 @@ static void *sqlite3MemMalloc(int nByte){
   sqlite3_int64 *p;
   assert( nByte>0 );
   nByte = ROUND8(nByte);
-  p = SQLITE_MALLOC( nByte+8 );
+  if( nByte > gbl_blob_sz_thresh_bytes )
+    p = comdb2_bmalloc( blobmem, nByte+8 );
+  else
+    p = SQLITE_MALLOC( nByte+8 );
   if( p ){
     p[0] = nByte;
     p++;
@@ -172,10 +181,11 @@ static void sqlite3MemFree(void *pPrior){
 */
 static int sqlite3MemSize(void *pPrior){
 #ifdef SQLITE_MALLOCSIZE
-  return pPrior ? (int)SQLITE_MALLOCSIZE(pPrior) : 0;
+  assert( pPrior!=0 );
+  return (int)SQLITE_MALLOCSIZE(pPrior);
 #else
   sqlite3_int64 *p;
-  if( pPrior==0 ) return 0;
+  assert( pPrior!=0 );
   p = (sqlite3_int64*)pPrior;
   p--;
   return (int)p[0];

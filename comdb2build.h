@@ -43,7 +43,7 @@ int readIntFromToken(Token* t, int *rst);
 void    fillTableOption(struct schema_change_type*, int);
 
 int     comdb2SqlSchemaChange(OpFunc *arg);
-void    comdb2StartTable(Parse*, Token*, Token*, int, Token*);
+void    comdb2CreateTable(Parse*, Token*, Token*, int, Token*, int, int);
 void    comdb2AlterTable(Parse*, Token*, Token*, int, Token*);
 void    comdb2DropTable(Parse *pParse, SrcList *pName);
 
@@ -68,9 +68,9 @@ void    comdb2truncate(Parse*, Token*, Token*);
 
 void    comdb2bulkimport(Parse*, Token*, Token*, Token*, Token*);
 
-void    comdb2createproc(Parse*, Token*, Token*);
-void    comdb2defaultProcedure(Parse*, Token*, Token*);
-void    comdb2dropproc(Parse*, Token*, Token* ver);
+void    comdb2CreateProcedure(Parse*, Token*, Token*, Token*);
+void    comdb2DefaultProcedure(Parse*, Token*, Token*, int);
+void    comdb2DropProcedure(Parse*, Token*, Token*, int);
 
 void comdb2CreateTimePartition(Parse* p, Token* table, Token* name, Token* period,
     Token* retention, Token* start);
@@ -97,4 +97,11 @@ enum
 };
 
 void    comdb2getkw(Parse* pParse, int reserved);
+
+#define TokenStr(out, in)                                                      \
+    char out[in->n + 1];                                                       \
+    memcpy(out, in->z, in->n);                                                 \
+    out[in->n] = '\0';                                                         \
+    sqlite3Dequote(out)
+
 #endif // COMDB2BUILD_H

@@ -186,7 +186,8 @@ static int systblFieldsColumn(
       break;
     }
     case STFIELD_DEC: {
-      sqlite3_result_text(ctx, YESNO(pField->flags & INDEX_DESCEND), -1, NULL);
+      sqlite3_result_text(ctx, YESNO(pField->flags & INDEX_DESCEND),
+        -1, SQLITE_STATIC);
       break;
     }
   }

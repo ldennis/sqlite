@@ -14,6 +14,7 @@
 */
 #include "sqliteInt.h"
 extern int gbl_update_delete_limit;
+extern int gbl_partial_indexes;
 
 /*
 ** While a SrcList can in general represent multiple tables and subqueries
@@ -108,7 +109,7 @@ void sqlite3MaterializeView(
     assert( pFrom->a[0].pUsing==0 );
   }
   pSel = sqlite3SelectNew(pParse, 0, pFrom, pWhere, 0, 0, 0, 
-        SF_IncludeHidden, 0, 0);
+                          SF_IncludeHidden, 0, 0);
   sqlite3SelectDestInit(&dest, SRT_EphemTab, iCur);
   sqlite3Select(pParse, pSel, &dest);
   sqlite3SelectDelete(db, pSel);
@@ -143,14 +144,14 @@ Expr *sqlite3LimitWhere(
   /* COMDB2 MODIFICATION */
   if (pLimit && gbl_update_delete_limit == 0) {
     sqlite3ErrorMsg(pParse, "LIMIT on %s without lrl option: update_delete_limit", zStmtType);
-    goto limit_where_cleanup_2;
+    goto limit_where_cleanup;
   }
 
   /* Check that there isn't an ORDER BY without a LIMIT clause.
   */
   if( pOrderBy && (pLimit == 0) ) {
     sqlite3ErrorMsg(pParse, "ORDER BY without LIMIT on %s", zStmtType);
-    goto limit_where_cleanup_2;
+    goto limit_where_cleanup;
   }
 
   /* We only need to generate a select expression if there
@@ -172,16 +173,16 @@ Expr *sqlite3LimitWhere(
   */
 
   pSelectRowid = sqlite3PExpr(pParse, TK_ROW, 0, 0, 0);
-  if( pSelectRowid == 0 ) goto limit_where_cleanup_2;
+  if( pSelectRowid == 0 ) goto limit_where_cleanup;
   pEList = sqlite3ExprListAppend(pParse, 0, pSelectRowid);
-  if( pEList == 0 ) goto limit_where_cleanup_2;
+  if( pEList == 0 ) goto limit_where_cleanup;
 
   /* duplicate the FROM clause as it is needed by both the DELETE/UPDATE tree
   ** and the SELECT subtree. */
   pSelectSrc = sqlite3SrcListDup(pParse->db, pSrc, 0);
   if( pSelectSrc == 0 ) {
     sqlite3ExprListDelete(pParse->db, pEList);
-    goto limit_where_cleanup_2;
+    goto limit_where_cleanup;
   }
 
   /* generate the SELECT expression tree. */
@@ -191,21 +192,11 @@ Expr *sqlite3LimitWhere(
 
   /* now generate the new WHERE rowid IN clause for the DELETE/UDPATE */
   pWhereRowid = sqlite3PExpr(pParse, TK_ROW, 0, 0, 0);
-  if( pWhereRowid == 0 ) goto limit_where_cleanup_1;
-  pInClause = sqlite3PExpr(pParse, TK_IN, pWhereRowid, 0, 0);
-  if( pInClause == 0 ) goto limit_where_cleanup_1;
-
-  pInClause->x.pSelect = pSelect;
-  pInClause->flags |= EP_xIsSelect;
-  sqlite3ExprSetHeightAndFlags(pParse, pInClause);
+  pInClause = pWhereRowid ? sqlite3PExpr(pParse, TK_IN, pWhereRowid, 0, 0) : 0;
+  sqlite3PExprAddSelect(pParse, pInClause, pSelect);
   return pInClause;
 
-  /* something went wrong. clean up anything allocated. */
-limit_where_cleanup_1:
-  sqlite3SelectDelete(pParse->db, pSelect);
-  return 0;
-
-limit_where_cleanup_2:
+limit_where_cleanup:
   sqlite3ExprDelete(pParse->db, pWhere);
   sqlite3ExprListDelete(pParse->db, pOrderBy);
   sqlite3ExprDelete(pParse->db, pLimit);
@@ -256,11 +247,12 @@ void sqlite3DeleteFrom(
   int addrBypass = 0;    /* Address of jump over the delete logic */
   int addrLoop = 0;      /* Top of the delete loop */
   int addrEphOpen = 0;   /* Instruction to open the Ephemeral table */
+  int bComplex;          /* True if there are triggers or FKs or
+                         ** subqueries in the WHERE clause */
  
 #ifndef SQLITE_OMIT_TRIGGER
   int isView;                  /* True if attempting to delete from a view */
   Trigger *pTrigger;           /* List of table triggers, if required */
-  int bComplex;                /* True if there are either triggers or FKs */
 #endif
 
   memset(&sContext, 0, sizeof(sContext));
@@ -288,7 +280,6 @@ void sqlite3DeleteFrom(
 #else
 # define pTrigger 0
 # define isView 0
-# define bComplex 0
 #endif
 #ifdef SQLITE_OMIT_VIEW
 # undef isView
@@ -369,7 +360,14 @@ void sqlite3DeleteFrom(
   ** It is easier just to erase the whole table. Prior to version 3.6.5,
   ** this optimization caused the row change count (the value returned by 
   ** API function sqlite3_count_changes) to be set incorrectly.  */
-  if( rcauth==SQLITE_OK && pWhere==0 && !bComplex && !IsVirtual(pTab) ){
+  if( rcauth==SQLITE_OK
+   && pWhere==0
+   && !bComplex
+   && !IsVirtual(pTab)
+#ifdef SQLITE_ENABLE_PREUPDATE_HOOK
+   && db->xPreUpdateCallback==0
+#endif
+  ){
     assert( !isView );
     sqlite3TableLock(pParse, iDb, pTab->tnum, 1, pTab->zName);
     if( HasRowid(pTab) ){
@@ -383,7 +381,8 @@ void sqlite3DeleteFrom(
   }else
 #endif /* SQLITE_OMIT_TRUNCATE_OPTIMIZATION */
   {
-    u16 wcf = WHERE_ONEPASS_DESIRED|WHERE_DUPLICATES_OK;
+    u16 wcf = WHERE_ONEPASS_DESIRED|WHERE_DUPLICATES_OK|WHERE_SEEK_TABLE;
+    if( sNC.ncFlags & NC_VarSelect ) bComplex = 1;
     wcf |= (bComplex ? 0 : WHERE_ONEPASS_MULTIROW);
     if( HasRowid(pTab) ){
       /* For a rowid table, initialize the RowSet to an empty set */
@@ -415,8 +414,9 @@ void sqlite3DeleteFrom(
     pWInfo = sqlite3WhereBegin(pParse, pTabList, pWhere, 0, 0, wcf, iTabCur+1);
     if( pWInfo==0 ) goto delete_from_cleanup;
     eOnePass = sqlite3WhereOkOnePass(pWInfo, aiCurOnePass);
-    assert( IsVirtual(pTab)==0 || eOnePass==ONEPASS_OFF );
-
+    assert( IsVirtual(pTab)==0 || eOnePass!=ONEPASS_MULTI );
+    assert( IsVirtual(pTab) || bComplex || eOnePass!=ONEPASS_OFF );
+  
     /* Keep track of the number of rows to be deleted */
     if( db->flags & SQLITE_CountRows ){
       sqlite3VdbeAddOp2(v, OP_AddImm, memCnt, 1);
@@ -425,6 +425,7 @@ void sqlite3DeleteFrom(
     /* Extract the rowid or primary key for the current row */
     if( pPk ){
       for(i=0; i<nPk; i++){
+        assert( pPk->aiColumn[i]>=0 );
         sqlite3ExprCodeGetColumnOfTable(v, pTab, iTabCur,
                                         pPk->aiColumn[i], iPk+i);
       }
@@ -435,12 +436,12 @@ void sqlite3DeleteFrom(
       if( iKey>pParse->nMem ) pParse->nMem = iKey;
     }
   
-    if( eOnePass!=ONEPASS_OFF){
-      /* For ONEPASS, no need to store the rowid/primary-key.  There is only
+    if( eOnePass!=ONEPASS_OFF ){
+      /* For ONEPASS, no need to store the rowid/primary-key. There is only
       ** one, so just keep it in its register(s) and fall through to the
       ** delete code.  */
       nKey = nPk; /* OP_Found will use an unpacked key */
-      aToOpen = sqlite3DbMallocRaw(db, nIdx+2);
+      aToOpen = sqlite3DbMallocRawNN(db, nIdx+2);
       if( aToOpen==0 ){
         sqlite3WhereEnd(pWInfo);
         goto delete_from_cleanup;
@@ -452,19 +453,19 @@ void sqlite3DeleteFrom(
       if( addrEphOpen ) sqlite3VdbeChangeToNoop(v, addrEphOpen);
     }else{
       if( pPk ){
-         /* Add the PK key for this row to the temporary table */
-         iKey = ++pParse->nMem;
-         nKey = 0;   /* Zero tells OP_Found to use a composite key */
-         sqlite3VdbeAddOp4(v, OP_MakeRecord, iPk, nPk, iKey,
-               sqlite3IndexAffinityStr(v, pPk), nPk);
-         sqlite3VdbeAddOp2(v, OP_IdxInsert, iEphCur, iKey);
+        /* Add the PK key for this row to the temporary table */
+        iKey = ++pParse->nMem;
+        nKey = 0;   /* Zero tells OP_Found to use a composite key */
+        sqlite3VdbeAddOp4(v, OP_MakeRecord, iPk, nPk, iKey,
+            sqlite3IndexAffinityStr(pParse->db, pPk), nPk);
+        sqlite3VdbeAddOp2(v, OP_IdxInsert, iEphCur, iKey);
       }else{
-         /* Add the rowid of the row to be deleted to the RowSet */
-         nKey = 1;  /* OP_Seek always uses a single rowid */
-         sqlite3VdbeAddOp2(v, OP_RowSetAdd, iRowSet, iKey);
+        /* Add the rowid of the row to be deleted to the RowSet */
+        nKey = 1;  /* OP_Seek always uses a single rowid */
+        sqlite3VdbeAddOp2(v, OP_RowSetAdd, iRowSet, iKey);
       }
     }
-
+  
     /* If this DELETE cannot use the ONEPASS strategy, this is the 
     ** end of the WHERE loop */
     if( eOnePass!=ONEPASS_OFF ){
@@ -484,7 +485,7 @@ void sqlite3DeleteFrom(
         iAddrOnce = sqlite3CodeOnce(pParse); VdbeCoverage(v);
       }
       testcase( IsVirtual(pTab) );
-      sqlite3OpenTableAndIndices(pParse, pTab, OP_OpenWrite, OPFLAG_FORDELETE, 
+      sqlite3OpenTableAndIndices(pParse, pTab, OP_OpenWrite, OPFLAG_FORDELETE,
                                  iTabCur, aToOpen, &iDataCur, &iIdxCur);
       assert( pPk || IsVirtual(pTab) || iDataCur==iTabCur );
       assert( pPk || IsVirtual(pTab) || iIdxCur==iDataCur+1 );
@@ -496,7 +497,7 @@ void sqlite3DeleteFrom(
     */
     if( eOnePass!=ONEPASS_OFF ){
       assert( nKey==nPk );  /* OP_Found will use an unpacked key */
-      if( aToOpen[iDataCur-iTabCur] ){
+      if( !IsVirtual(pTab) && aToOpen[iDataCur-iTabCur] ){
         assert( pPk!=0 || pTab->pSelect!=0 );
         sqlite3VdbeAddOp4Int(v, OP_NotFound, iDataCur, addrBypass, iKey, nKey);
         VdbeCoverage(v);
@@ -518,7 +519,11 @@ void sqlite3DeleteFrom(
       sqlite3VtabMakeWritable(pParse, pTab);
       sqlite3VdbeAddOp4(v, OP_VUpdate, 0, 1, iKey, pVTab, P4_VTAB);
       sqlite3VdbeChangeP5(v, OE_Abort);
+      assert( eOnePass==ONEPASS_OFF || eOnePass==ONEPASS_SINGLE );
       sqlite3MayAbort(pParse);
+      if( eOnePass==ONEPASS_SINGLE && sqlite3IsToplevel(pParse) ){
+        pParse->isMultiWrite = 0;
+      }
     }else
 #endif
     {
@@ -528,7 +533,7 @@ void sqlite3DeleteFrom(
         iIdxNoSeek = aiCurOnePass[1];
       }
       sqlite3GenerateRowDelete(pParse, pTab, pTrigger, iDataCur, iIdxCur,
-            iKey, nKey, count, OE_Default, eOnePass, iIdxNoSeek);
+          iKey, nKey, count, OE_Default, eOnePass, iIdxNoSeek);
     }
   
     /* End of the loop over all rowids/primary-keys. */
@@ -539,7 +544,7 @@ void sqlite3DeleteFrom(
       sqlite3VdbeAddOp2(v, OP_Next, iEphCur, addrLoop+1); VdbeCoverage(v);
       sqlite3VdbeJumpHere(v, addrLoop);
     }else{
-      sqlite3VdbeAddOp2(v, OP_Goto, 0, addrLoop);
+      sqlite3VdbeGoto(v, addrLoop);
       sqlite3VdbeJumpHere(v, addrLoop);
     }     
   
@@ -712,14 +717,19 @@ void sqlite3GenerateRowDelete(
 
   /* Delete the index and table entries. Skip this step if pTab is really
   ** a view (in which case the only effect of the DELETE statement is to
-  ** fire the INSTEAD OF triggers).  */ 
+  ** fire the INSTEAD OF triggers).  
+  **
+  ** If variable 'count' is non-zero, then this OP_Delete instruction should
+  ** invoke the update-hook. The pre-update-hook, on the other hand should
+  ** be invoked unless table pTab is a system table. The difference is that
+  ** the update-hook is not invoked for rows removed by REPLACE, but the 
+  ** pre-update-hook is.
+  */ 
   if( pTab->pSelect==0 ){
     u8 p5 = 0;
     sqlite3GenerateRowIndexDelete(pParse, pTab, iDataCur, iIdxCur, 0,iIdxNoSeek);
     sqlite3VdbeAddOp2(v, OP_Delete, iDataCur, (count?OPFLAG_NCHANGE:0));
-    if( count ){
-      sqlite3VdbeChangeP4(v, -1, pTab->zName, P4_TRANSIENT);
-    }
+    sqlite3VdbeChangeP4(v, -1, (char*)pTab, P4_TABLE);
     if( eMode!=ONEPASS_OFF ){
       sqlite3VdbeChangeP5(v, OPFLAG_AUXDELETE);
     }
@@ -771,11 +781,9 @@ void sqlite3GenerateRowIndexDelete(
   int iDataCur,      /* Cursor of table holding data. */
   int iIdxCur,       /* First index cursor */
   int *aRegIdx,      /* Only delete if aRegIdx!=0 && aRegIdx[i]>0 */
-  int iIdxNoSeek     /* Do not delete from this cursor */  
+  int iIdxNoSeek     /* Do not delete from this cursor */
 ){
 
-  /* COMDB2 MODIFICATION */
-#if 0
   int i;             /* Index loop counter */
   int r1 = -1;       /* Register holding an index key */
   int iPartIdxLabel; /* Jump destination for skipping partial index entries */
@@ -783,6 +791,10 @@ void sqlite3GenerateRowIndexDelete(
   Index *pPrior = 0; /* Prior index */
   Vdbe *v;           /* The prepared statement under construction */
   Index *pPk;        /* PRIMARY KEY index, or NULL for rowid tables */
+
+  /* COMDB2 MODIFICATION */
+  if ( !gbl_partial_indexes || !pTab->hasPartIdx )
+      return;
 
   v = pParse->pVdbe;
   pPk = HasRowid(pTab) ? 0 : sqlite3PrimaryKeyIndex(pTab);
@@ -793,13 +805,12 @@ void sqlite3GenerateRowIndexDelete(
     if( iIdxCur+i==iIdxNoSeek ) continue;
     VdbeModuleComment((v, "GenRowIdxDel for %s", pIdx->zName));
     r1 = sqlite3GenerateIndexKey(pParse, pIdx, iDataCur, 0, 1,
-          &iPartIdxLabel, pPrior, r1);
+        &iPartIdxLabel, pPrior, r1);
     sqlite3VdbeAddOp3(v, OP_IdxDelete, iIdxCur+i, r1,
-          pIdx->uniqNotNull ? pIdx->nKeyCol : pIdx->nColumn);
+        pIdx->uniqNotNull ? pIdx->nKeyCol : pIdx->nColumn);
     sqlite3ResolvePartIdxLabel(pParse, iPartIdxLabel);
     pPrior = pIdx;
   }
-#endif
 }
 
 /*
@@ -845,17 +856,16 @@ int sqlite3GenerateIndexKey(
 ){
   Vdbe *v = pParse->pVdbe;
   int j;
-  Table *pTab = pIdx->pTable;
   int regBase;
   int nCol;
 
   if( piPartIdxLabel ){
     if( pIdx->pPartIdxWhere ){
       *piPartIdxLabel = sqlite3VdbeMakeLabel(v);
-      pParse->iPartIdxTab = iDataCur;
+      pParse->iSelfTab = iDataCur;
       sqlite3ExprCachePush(pParse);
-      sqlite3ExprIfFalse(pParse, pIdx->pPartIdxWhere, *piPartIdxLabel, 
-                         SQLITE_JUMPIFNULL);
+      sqlite3ExprIfFalseDup(pParse, pIdx->pPartIdxWhere, *piPartIdxLabel, 
+                            SQLITE_JUMPIFNULL);
     }else{
       *piPartIdxLabel = 0;
     }
@@ -864,9 +874,14 @@ int sqlite3GenerateIndexKey(
   regBase = sqlite3GetTempRange(pParse, nCol);
   if( pPrior && (regBase!=regPrior || pPrior->pPartIdxWhere) ) pPrior = 0;
   for(j=0; j<nCol; j++){
-    if( pPrior && pPrior->aiColumn[j]==pIdx->aiColumn[j] ) continue;
-    sqlite3ExprCodeGetColumnOfTable(v, pTab, iDataCur, pIdx->aiColumn[j],
-                                    regBase+j);
+    if( pPrior
+     && pPrior->aiColumn[j]==pIdx->aiColumn[j]
+     && pPrior->aiColumn[j]!=XN_EXPR
+    ){
+      /* This column was already computed by the previous index */
+      continue;
+    }
+    sqlite3ExprCodeLoadIndexColumn(pParse, pIdx, iDataCur, j, regBase+j);
     /* If the column affinity is REAL but the number is an integer, then it
     ** might be stored in the table as an integer (using a compact
     ** representation) then converted to REAL by an OP_RealAffinity opcode.
