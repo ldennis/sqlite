@@ -924,7 +924,7 @@ static int patternCompare(
     }
     c2 = Utf8Read(zString);
     if( c==c2 ) continue;
-    if( noCase && c<0x80 && c2<0x80 && sqlite3Tolower(c)==sqlite3Tolower(c2) ){
+    if( noCase  && sqlite3Tolower(c)==sqlite3Tolower(c2) && c<0x80 && c2<0x80 ){
       continue;
     }
     if( c==matchOne && zPattern!=zEscaped && c2!=0 ) continue;
@@ -1500,6 +1500,26 @@ static void trimFunc(
 }
 
 
+#ifdef SQLITE_ENABLE_UNKNOWN_SQL_FUNCTION
+/*
+** The "unknown" function is automatically substituted in place of
+** any unrecognized function name when doing an EXPLAIN or EXPLAIN QUERY PLAN
+** when the SQLITE_ENABLE_UNKNOWN_FUNCTION compile-time option is used.
+** When the "sqlite3" command-line shell is built using this functionality,
+** that allows an EXPLAIN or EXPLAIN QUERY PLAN for complex queries
+** involving application-defined functions to be examined in a generic
+** sqlite3 shell.
+*/
+static void unknownFunc(
+  sqlite3_context *context,
+  int argc,
+  sqlite3_value **argv
+){
+  /* no-op */
+}
+#endif /*SQLITE_ENABLE_UNKNOWN_SQL_FUNCTION*/
+
+
 /* IMP: R-25361-16150 This function is omitted from SQLite by default. It
 ** is only available if the SQLITE_SOUNDEX compile-time option is used
 ** when SQLite is built.
@@ -2060,10 +2080,10 @@ void sqlite3RegisterBuiltinFunctions(void){
     AGGREGATE(group_concat,      2, 0, 0, groupConcatStep, groupConcatFinalize),
   
     LIKEFUNC(glob, 2, &globInfo, SQLITE_FUNC_LIKE|SQLITE_FUNC_CASE),
-  #ifdef SQLITE_CASE_SENSITIVE_LIKE
+#ifdef SQLITE_CASE_SENSITIVE_LIKE
     LIKEFUNC(like, 2, &likeInfoAlt, SQLITE_FUNC_LIKE|SQLITE_FUNC_CASE),
     LIKEFUNC(like, 3, &likeInfoAlt, SQLITE_FUNC_LIKE|SQLITE_FUNC_CASE),
-  #else
+#else
     LIKEFUNC(like, 2, &likeInfoNorm, SQLITE_FUNC_LIKE),
     LIKEFUNC(like, 3, &likeInfoNorm, SQLITE_FUNC_LIKE),
   #endif
@@ -2073,6 +2093,9 @@ void sqlite3RegisterBuiltinFunctions(void){
     FUNCTION(partition_info,     2, 0, 0, partitionInfoFunc),
     FUNCTION(comdb2_host,    0, 0, 0,     comdb2HostFunc),
     FUNCTION(comdb2_prevquerycost,    0, 0, 0, comdb2PrevquerycostFunc),
+#endif
+#ifdef SQLITE_ENABLE_UNKNOWN_SQL_FUNCTION
+    FUNCTION(unknown,           -1, 0, 0, unknownFunc      ),
 #endif
     FUNCTION(coalesce,           1, 0, 0, 0                ),
     FUNCTION(coalesce,           0, 0, 0, 0                ),

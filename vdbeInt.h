@@ -15,8 +15,8 @@
 ** 6000 lines long) it was split up into several smaller files and
 ** this header information was factored out.
 */
-#ifndef _VDBEINT_H_
-#define _VDBEINT_H_
+#ifndef SQLITE_VDBEINT_H
+#define SQLITE_VDBEINT_H
 
 /* COMDB2 MODIFICATION */
 #include <time.h>
@@ -711,4 +711,4 @@ Mem* sqlite3GetCachedResultRow(sqlite3_stmt *pStmt, int *nColumns);
 
 #define sqlite3IsFixedLengthSerialType(t) ( (t)<12 || (t)==SQLITE_MAX_U32 || (t)==(SQLITE_MAX_U32-1) )
 
-#endif /* !defined(_VDBEINT_H_) */
+#endif /* !defined(SQLITE_VDBEINT_H) */
