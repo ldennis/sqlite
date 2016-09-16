@@ -2276,7 +2276,7 @@ case OP_Cast: {                  /* in1 */
 #endif /* SQLITE_OMIT_CAST */
 
 /* Opcode: Lt P1 P2 P3 P4 P5
-** Synopsis: if r[P1]<r[P3] goto P2
+** Synopsis: IF r[P3]<r[P1]
 **
 ** Compare the values in register P1 and P3.  If reg(P3)<reg(P1) then
 ** jump to address P2.  
@@ -2311,7 +2311,7 @@ case OP_Cast: {                  /* in1 */
 ** bit set.
 */
 /* Opcode: Ne P1 P2 P3 P4 P5
-** Synopsis: if r[P1]!=r[P3] goto P2
+** Synopsis: IF r[P3]!=r[P1]
 **
 ** This works just like the Lt opcode except that the jump is taken if
 ** the operands in registers P1 and P3 are not equal.  See the Lt opcode for
@@ -2324,7 +2324,7 @@ case OP_Cast: {                  /* in1 */
 ** the SQLITE_NULLEQ flag were omitted from P5.
 */
 /* Opcode: Eq P1 P2 P3 P4 P5
-** Synopsis: if r[P1]==r[P3] goto P2
+** Synopsis: IF r[P3]==r[P1]
 **
 ** This works just like the Lt opcode except that the jump is taken if
 ** the operands in registers P1 and P3 are equal.
@@ -2337,21 +2337,21 @@ case OP_Cast: {                  /* in1 */
 ** the SQLITE_NULLEQ flag were omitted from P5.
 */
 /* Opcode: Le P1 P2 P3 P4 P5
-** Synopsis: if r[P1]<=r[P3] goto P2
+** Synopsis: IF r[P3]<=r[P1]
 **
 ** This works just like the Lt opcode except that the jump is taken if
 ** the content of register P3 is less than or equal to the content of
 ** register P1.  See the Lt opcode for additional information.
 */
 /* Opcode: Gt P1 P2 P3 P4 P5
-** Synopsis: if r[P1]>r[P3] goto P2
+** Synopsis: IF r[P3]>r[P1]
 **
 ** This works just like the Lt opcode except that the jump is taken if
 ** the content of register P3 is greater than the content of
 ** register P1.  See the Lt opcode for additional information.
 */
 /* Opcode: Ge P1 P2 P3 P4 P5
-** Synopsis: if r[P1]>=r[P3] goto P2
+** Synopsis: IF r[P3]>=r[P1]
 **
 ** This works just like the Lt opcode except that the jump is taken if
 ** the content of register P3 is greater than or equal to the content of
