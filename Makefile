@@ -24,7 +24,7 @@ OBJS_GEN=parse.o opcodes.o inline/serialget.o inline/memcompare.o inline/vdbecom
 OBJS_EXT=ext/comdb2systbl/tables.o \
 ext/comdb2systbl/columns.o         \
 ext/comdb2systbl/keys.o            \
-ext/comdb2systbl/keyscomponents.o  \
+ext/comdb2systbl/keycomponents.o   \
 ext/comdb2systbl/constraints.o     \
 ext/comdb2systbl/tablesizes.o      \
 ext/comdb2systbl/procedures.o      

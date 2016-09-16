@@ -4198,6 +4198,17 @@ static inline int compareDateTimeInterval(int f1, int f2, int combined_flags, co
      }
      else
      {
+         /* best effort */
+         if(!(f1&MEM_Interval))
+         {
+             if (sqlite3VdbeMemIntervalfy((Mem *)pMem1,SQLITE_AFF_INTV_MO) != SQLITE_OK)
+                 sqlite3VdbeMemIntervalfy((Mem *)pMem1,SQLITE_AFF_INTV_SE);
+         }
+         else if(!(f2&MEM_Interval))
+         {
+             if (sqlite3VdbeMemIntervalfy((Mem *)pMem2,SQLITE_AFF_INTV_MO) != SQLITE_OK)
+                 sqlite3VdbeMemIntervalfy((Mem *)pMem2,SQLITE_AFF_INTV_SE);
+         }
 	     return interval_cmp(&pMem1->du.tv, &pMem2->du.tv);
      }
   }

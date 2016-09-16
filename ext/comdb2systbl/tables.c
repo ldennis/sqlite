@@ -195,7 +195,7 @@ int comdb2SystblInit(
   rc = sqlite3_create_module(db, "comdb2sys_tables", &systblTablesModule, 0);
   rc = sqlite3_create_module(db, "comdb2sys_columns", &systblColumnsModule, 0);
   rc = sqlite3_create_module(db, "comdb2sys_keys", &systblKeysModule, 0);
-  rc = sqlite3_create_module(db, "comdb2sys_keyscomponents",
+  rc = sqlite3_create_module(db, "comdb2sys_keycomponents",
          &systblFieldsModule, 0);
   rc = sqlite3_create_module(db, "comdb2sys_constraints",
          &systblConstraintsModule, 0);

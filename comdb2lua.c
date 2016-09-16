@@ -23,13 +23,16 @@ int bdb_get_sp_get_default_version(const char *, int *);
 
 int comdb2LocateSP(Parse *p, char *sp)
 {
-	int bdb_err;
-	int rc = 0;
-	if (bdb_get_sp_get_default_version(sp, &bdb_err) < 0) {
-		rc = -1;
+	char *ver = NULL;
+	int bdberr;
+	int rc0 = bdb_get_sp_get_default_version(sp, &bdberr);
+	int rc1 = bdb_get_default_versioned_sp(sp, &ver);
+	free(ver);
+	if (rc0 < 0 && rc1 < 0) {
 		sqlite3ErrorMsg(p, "no such procedure: %s", sp);
+		return -1;
 	}
-	return rc;
+	return 0;
 }
 
 enum ops { del = 0x01, ins = 0x02, upd = 0x04 };

@@ -63,7 +63,7 @@ static int systblFieldsConnect(
   rc = sqlite3_declare_vtab(db,
      "CREATE TABLE comdb2sys_keycomponents(tablename,"
                                           "keyname,"
-                                          "columnumber,"
+                                          "columnnumber,"
                                           "columnname,"
                                           "isdescending)");
   if( rc==SQLITE_OK ){
