@@ -162,11 +162,11 @@ static int systblConstraintsColumn(
       break;
     }
     case STCON_FTNAME: {
-      sqlite3_result_text(ctx, pConstraint->table[0], -1, NULL);
+      sqlite3_result_text(ctx, pConstraint->table[pCur->iRuleid], -1, NULL);
       break;
     }
     case STCON_FKNAME: {
-      sqlite3_result_text(ctx, pConstraint->keynm[0], -1, NULL);
+      sqlite3_result_text(ctx, pConstraint->keynm[pCur->iRuleid], -1, NULL);
       break;
     }
     case STCON_CDELETE: {

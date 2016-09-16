@@ -259,16 +259,20 @@ sql_permission(A) ::= WRITE.{ A = AUTH_WRITE;}
 %type op_permission{int}
 op_permission(A) ::= OP.   { A = AUTH_OP;   }
 
-%type revoke {int}
-revoke(A) ::= NOT. { A = 1;}
-revoke(A) ::= . { A = 0; }
-
-cmd ::= GRANT revoke(N) sql_permission(P) ON nm(T) dbnm(Y) TO nm(U). {
-    comdb2grant(pParse, N, P, &T,&Y,&U);
+cmd ::= GRANT sql_permission(P) ON nm(T) dbnm(Y) TO nm(U). {
+    comdb2grant(pParse, 0, P, &T,&Y,&U);
 }
 
-cmd ::= GRANT revoke(N) op_permission(P) TO nm(U). {
-    comdb2grant(pParse, N, P, NULL,NULL,&U);
+cmd ::= GRANT op_permission(P) TO nm(U). {
+    comdb2grant(pParse, 0, P, NULL,NULL,&U);
+}
+
+cmd ::= REVOKE sql_permission(P) ON nm(T) dbnm(Y) TO nm(U). {
+    comdb2grant(pParse, 1, P, &T,&Y,&U);
+}
+
+cmd ::= REVOKE op_permission(P) TO nm(U). {
+    comdb2grant(pParse, 1, P, NULL,NULL,&U);
 }
 
 //////////////////// COMDB2 TRUNCATE TABLE statement /////////////////////////
@@ -491,7 +495,6 @@ columnname(A) ::= nm(A) typetoken(Y). {sqlite3AddColumn(pParse,&A,&Y);}
   CRLE
   DATA
   DATABLOB
-  DEFAULTSP
   FOR
   FUNCTION
   GET
@@ -507,7 +510,6 @@ columnname(A) ::= nm(A) typetoken(Y). {sqlite3AddColumn(pParse,&A,&Y);}
   OPTIONS
   PARTITION
   PASSWORD
-  PERCENTAGE
   PERIOD
   PROCEDURE
   PUT
@@ -516,6 +518,7 @@ columnname(A) ::= nm(A) typetoken(Y). {sqlite3AddColumn(pParse,&A,&Y);}
   REC
   RESERVED
   RETENTION
+  REVOKE
   RLE
   SCALAR
   START
