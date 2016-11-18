@@ -185,8 +185,7 @@ static void absFunc(sqlite3_context *context, int argc, sqlite3_value **argv){
       dec_ctx_init(&ctx, DEC_INIT_DECQUAD, gbl_decimal_rounding);
 
       decQuadAbs( &res_val.u.dec, &val->u.dec, &ctx);
-      if(dfp_conv_check_status( &ctx, "quad", "abs(quad)"))
-      {
+      if( dfp_conv_check_status( &ctx, "quad", "abs(quad)") ){
           sqlite3_result_error(context, "decimal overflow", -1);
           break;
       }
@@ -672,29 +671,28 @@ static void partitionInfoFunc(
   const char   *option;
   char         *info;
 
-  assert(argc==2);
-  if(sqlite3_value_type(argv[0]) != SQLITE_TEXT) {
+  assert( argc==2 );
+  if( sqlite3_value_type(argv[0]) != SQLITE_TEXT ){
     return;
   }
   partition_name = sqlite3_value_text(argv[0]);
   
-  if(sqlite3_value_type(argv[1]) != SQLITE_TEXT) {
+  if( sqlite3_value_type(argv[1]) != SQLITE_TEXT ){
     return;
   }
   option = sqlite3_value_text(argv[1]);
 
   info = comdb2_partition_info(partition_name, option);
 
-  if(!info)
-  {
+  if( !info ){
+
     sqlite3_result_null(context);
-  }
-  else
-  {
+  }else{
     sqlite3_result_text(context, info, -1, SQLITE_TRANSIENT);
 
-    if(info)
+    if(info) {
       free(info);
+    }
   }
 }
 
@@ -1631,52 +1629,48 @@ static void sumStep(sqlite3_context *context, int argc, sqlite3_value **argv){
       if( (p->approx|p->overflow)==0 && sqlite3AddInt64(&p->iSum, v) ){
         p->overflow = 1;
       }
-    }else if( type==SQLITE_DECIMAL){
+    }else if( type==SQLITE_DECIMAL ){
        intv_t v = *(intv_t*)sqlite3_value_interval(argv[0], SQLITE_DECIMAL);
 
-       if (p->decs == 0)
-       {
-          p->decSum = v.u.dec;
-          p->decs = 1;
+       if( p->decs == 0 ){
+         p->decSum = v.u.dec;
+         p->decs = 1;
 
-          if(0) {
-             char aaa[128];
-             char bbb[128];
+         if( 0 ){
+           char aaa[128];
+           char bbb[128];
 
-             decQuadToString( &p->decSum, aaa);
-             decQuadToString( &v.u.dec, bbb);
+           decQuadToString( &p->decSum, aaa);
+           decQuadToString( &v.u.dec, bbb);
 
-             fprintf(stderr, "%s  = %s\n",
-                   aaa, bbb);
-          }
-       }
-       else
-       {
-          decContext ctx;
-          decQuad    res;
+           fprintf(stderr, "%s  = %s\n",
+            aaa, bbb);
+         }
+       }else{
+         decContext ctx;
+         decQuad    res;
        
-          dec_ctx_init( &ctx, DEC_INIT_DECQUAD, gbl_decimal_rounding);
-          decQuadAdd( &res, &p->decSum, &v.u.dec, &ctx);
+         dec_ctx_init( &ctx, DEC_INIT_DECQUAD, gbl_decimal_rounding);
+         decQuadAdd( &res, &p->decSum, &v.u.dec, &ctx);
 
-          if (dfp_conv_check_status(&ctx, "quad", "add(quads)"))
-          {
-             sqlite3_result_error(context, "decimal overflow", -1);
-          }
+         if( dfp_conv_check_status(&ctx, "quad", "add(quads)") ){
+           sqlite3_result_error(context, "decimal overflow", -1);
+         }
 
-          if(0){
-             char aaa[128];
-             char bbb[128];
-             char ccc[128];
+         if( 0 ){
+           char aaa[128];
+           char bbb[128];
+           char ccc[128];
 
-             decQuadToString( &p->decSum, aaa);
-             decQuadToString( &v.u.dec, bbb);
-             decQuadToString( &res, ccc);
+           decQuadToString( &p->decSum, aaa);
+           decQuadToString( &v.u.dec, bbb);
+           decQuadToString( &res, ccc);
 
-             fprintf(stderr, "%s + %s = %s\n",
-                   aaa, bbb, ccc);
-          }
+           fprintf(stderr, "%s + %s = %s\n",
+            aaa, bbb, ccc);
+         }
 
-          p->decSum = res;
+         p->decSum = res;
        }
 
     }else{
@@ -2070,9 +2064,9 @@ void sqlite3RegisterBuiltinFunctions(void){
 #ifdef SQLITE_BUILDING_FOR_COMDB2
     FUNCTION(comdb2_version,    0, 0, 0, comdb2VersionFunc),
     FUNCTION(table_version,     1, 0, 0, tableVersionFunc),
-    FUNCTION(partition_info,     2, 0, 0, partitionInfoFunc),
-    FUNCTION(comdb2_host,    0, 0, 0,     comdb2HostFunc),
-    FUNCTION(comdb2_prevquerycost,    0, 0, 0, comdb2PrevquerycostFunc),
+    FUNCTION(partition_info,    2, 0, 0, partitionInfoFunc),
+    FUNCTION(comdb2_host,       0, 0, 0, comdb2HostFunc),
+    FUNCTION(comdb2_prevquerycost,0,0,0, comdb2PrevquerycostFunc),
 #endif
     FUNCTION(coalesce,           1, 0, 0, 0                ),
     FUNCTION(coalesce,           0, 0, 0, 0                ),

@@ -1839,8 +1839,8 @@ struct Table {
   Trigger *pTrigger;   /* List of triggers stored in pSchema */
   Schema *pSchema;     /* Schema that contains this table */
   Table *pNextZombie;  /* Next on the Parse.pZombieTab list */
-  int    version;      /* used for cached table schema, from remote */
-  int    iDb;          /* iDb version */
+  int version;         /* used for cached table schema, from remote */
+  int iDb;             /* iDb version */
 
   /* COMDB2 MODIFICATION */
   int hasPartIdx;
@@ -4349,7 +4349,8 @@ void sqlite3_dump_tunables(void);
 void sqlite3_set_tunable_by_name(char *tname, char *val);
 
 /* COMDB2 MODIFICATION */
-extern int sqlite3AddAndLockTable(sqlite3 *db, const char *dbname, const char *table,
+extern int sqlite3AddAndLockTable(sqlite3 *db, const char *dbname,
+      const char *table,
       int *version, int in_analysis_load);
 extern int sqlite3UnlockTable(const char *dbname, const char *table);
 extern int comdb2_dynamic_attach(sqlite3 *db, sqlite3_context *context, sqlite3_value **argv,
@@ -4372,8 +4373,8 @@ int sqlite3DbstatRegister(sqlite3*);
 #endif
 
 #ifndef _SQL_H_
-#include <mem_sqlite.h>
-#include <mem_override.h>
+#include "mem_sqlite.h"
+#include "mem_override.h"
 #endif
 
 struct Cdb2TrigEvent {

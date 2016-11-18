@@ -962,7 +962,7 @@ void sqlite3Pragma(
       if( zRight[0] ){
         res=sqlite3OsFileControl(pFile, SQLITE_SET_LOCKPROXYFILE, 
                                      zRight);
-      } else {
+      }else{
         res=sqlite3OsFileControl(pFile, SQLITE_SET_LOCKPROXYFILE, 
                                      NULL);
       }

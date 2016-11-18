@@ -349,7 +349,7 @@ static int echoDeclareVtab(
         if( rc==SQLITE_OK ){
           rc = rc2;
         }
-      } else {
+      }else{
         rc = sqlite3_finalize(pStmt);
         if( rc==SQLITE_OK ){ 
           rc = SQLITE_ERROR;
@@ -828,7 +828,7 @@ static int echoBestIndex(sqlite3_vtab *tab, sqlite3_index_info *pIdxInfo){
   if( Tcl_GetVar(interp, "echo_module_cost", TCL_GLOBAL_ONLY) ){
     cost = atof(Tcl_GetVar(interp, "echo_module_cost", TCL_GLOBAL_ONLY));
     useCost = 1;
-  } else {
+  }else{
     zQuery = sqlite3_mprintf("SELECT count(*) FROM %Q", pVtab->zTableName);
     if( !zQuery ){
       return SQLITE_NOMEM;
@@ -896,7 +896,7 @@ static int echoBestIndex(sqlite3_vtab *tab, sqlite3_index_info *pIdxInfo){
       if( zOp[0]=='L' ){
         zNew = sqlite3_mprintf(" %s %s LIKE (SELECT '%%'||?||'%%')", 
                                zSep, zNewCol);
-      } else {
+      }else{
         zNew = sqlite3_mprintf(" %s %s %s ?", zSep, zNewCol, zOp);
       }
       string_concat(&zQuery, zNew, 1, &rc);

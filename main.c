@@ -108,11 +108,11 @@ char *sqlite3_data_directory = 0;
 
 
 /* COMDB2 MODIFICATION */
-static int sqlite3PCacheBufferSetup(void *dummy, ...) { return 0; }
-static int sqlite3PcacheInitialize(void) { return 0; }
-static int sqlite3PcacheShutdown(void) { return 0; }
-static int sqlite3PCacheSetDefault(void) { return 0; }
-int sqlite3HeaderSizeBtree(void) { return 0; }
+static int sqlite3PCacheBufferSetup(void *dummy, ...){ return 0; }
+static int sqlite3PcacheInitialize(void){ return 0; }
+static int sqlite3PcacheShutdown(void){ return 0; }
+static int sqlite3PCacheSetDefault(void){ return 0; }
+int sqlite3HeaderSizeBtree(void){ return 0; }
 int sqlite3HeaderSizePcache(void){ return 0; } 
 int sqlite3HeaderSizePcache1(void){ return 0; } 
 

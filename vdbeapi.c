@@ -110,7 +110,7 @@ int sqlite3_finalize(sqlite3_stmt *pStmt){
 /*
 ** COMDB2 modification to reset the tspec of sqlite machine.
 */
-int sqlite3_resetclock(sqlite3_stmt *pStmt) {
+int sqlite3_resetclock(sqlite3_stmt *pStmt){
   int rc;
   if( pStmt==0 ){
     rc = SQLITE_OK;
@@ -171,18 +171,14 @@ int sqlite3_stmt_has_remotes(sqlite3_stmt *pStmt)
    Vdbe *v = (Vdbe*)pStmt;
    int   rc = 0;
 
-   if (v)
-   {
+   if( v ){
       sqlite3_mutex_enter(v->db->mutex);
 #if SQLITE_MAX_ATTACHED>30
    /* v->btreeMask is an array */
       int i;
-      if(v->btreeMask[0] >= 4)
-      {
+      if( v->btreeMask[0] >= 4){
         rc = 1;
-      }
-      else
-      {
+      }else{
         rc = sqlite3DbMaskAllZero(v->btreeMask, 1);
       }
 #else
@@ -242,7 +238,7 @@ int sqlite3_clear_bindings(sqlite3_stmt *pStmt){
 const dttz_t *sqlite3_value_datetime(sqlite3_value *pVal){
   Mem *p = (Mem*)pVal;
   if( !(p->flags & MEM_Datetime )){
-    if(sqlite3VdbeMemDatetimefy(pVal)) {
+    if( sqlite3VdbeMemDatetimefy(pVal) ){
         fprintf(stderr, "sqlite3_value_datetime: failed conversion\n");
     }
   }
@@ -250,18 +246,15 @@ const dttz_t *sqlite3_value_datetime(sqlite3_value *pVal){
 }
 const intv_t *sqlite3_value_interval(sqlite3_value *pVal, int type){
   Mem *p = (Mem*)pVal;
-  if( !(p->flags & MEM_Interval)){
-    if (type == SQLITE_DECIMAL)
-    {
-       if(sqlite3VdbeMemDecimalfy(pVal)) {
-          fprintf(stderr, "sqlite3_value_interval: failed decimal conversion\n");
-       }
-    }
-    else
-    {
-       if(sqlite3VdbeMemIntervalfy(pVal, type)) {
-          fprintf(stderr, "sqlite3_value_interval: failed conversion\n");
-       }
+  if( !(p->flags & MEM_Interval) ){
+    if( type == SQLITE_DECIMAL ){
+      if( sqlite3VdbeMemDecimalfy(pVal) ){
+	fprintf(stderr, "sqlite3_value_interval: failed decimal conversion\n");
+      }
+    }else{
+      if( sqlite3VdbeMemIntervalfy(pVal, type) ){
+	fprintf(stderr, "sqlite3_value_interval: failed conversion\n");
+      }
     }
   }
   return &p->du.tv;
@@ -753,8 +746,9 @@ static int sqlite3Step(Vdbe *p){
   }
 
 
-  if (rc == SQLITE_COMDB2SCHEMA)
+  if( rc == SQLITE_COMDB2SCHEMA ){
     return rc;
+  }
 
 #ifndef SQLITE_OMIT_TRACE
   /* If the statement completed successfully, invoke the profile callback */
@@ -826,8 +820,9 @@ int sqlite3_step(sqlite3_stmt *pStmt){
     assert( v->expired==0 );
   }
 
-  if (rc == SQLITE_COMDB2SCHEMA)
+  if( rc == SQLITE_COMDB2SCHEMA ){
     return rc;
+  }
 
   if( rc2!=SQLITE_OK ){
     /* This case occurs after failing to recompile an sql statement. 
@@ -843,7 +838,7 @@ int sqlite3_step(sqlite3_stmt *pStmt){
     if( !db->mallocFailed ){
       v->zErrMsg = sqlite3DbStrDup(db, zErr);
       v->rc = rc2;
-    } else {
+    }else{
       v->zErrMsg = 0;
       v->rc = rc = SQLITE_NOMEM_BKPT;
     }

@@ -57,6 +57,7 @@ static int systblKeysConnect(
 #define STKEY_UNIQUE    3
 #define STKEY_DATACOPY  4
 #define STKEY_RECNUM    5
+#define STKEY_CONDITION 6
 
   rc = sqlite3_declare_vtab(db,
      "CREATE TABLE comdb2sys_keys(tablename,"
@@ -64,7 +65,8 @@ static int systblKeysConnect(
                                  "keynumber,"
                                  "isunique,"
                                  "isdatacopy,"
-                                 "isrecnum)");
+                                 "isrecnum,"
+                                 "condition)");
   if( rc==SQLITE_OK ){
     pNew = *ppVtab = sqlite3_malloc( sizeof(*pNew) );
     if( pNew==0 ) return SQLITE_NOMEM;
@@ -168,7 +170,7 @@ static int systblKeysColumn(
       break;
     }
     case STKEY_UNIQUE: {
-      sqlite3_result_text(ctx, YESNO(pSchema->flags & SCHEMA_DUP),
+      sqlite3_result_text(ctx, YESNO(!(pSchema->flags & SCHEMA_DUP)),
         -1, SQLITE_STATIC);
       break;
     }
@@ -180,6 +182,10 @@ static int systblKeysColumn(
     case STKEY_RECNUM: {
       sqlite3_result_text(ctx, YESNO(pSchema->flags & SCHEMA_RECNUM),
         -1, SQLITE_STATIC);
+      break;
+    }
+    case STKEY_CONDITION: {
+      sqlite3_result_text(ctx, pSchema->where, -1, SQLITE_STATIC);
       break;
     }
   }

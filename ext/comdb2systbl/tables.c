@@ -21,11 +21,11 @@
 #endif
 
 #include <stdlib.h>
-#include <string.h>
 
 #include "comdb2.h"
 #include "comdb2systbl.h"
 #include "comdb2systblInt.h"
+#include "sql.h"
 
 /* systbl_tables_cursor is a subclass of sqlite3_vtab_cursor which serves
 ** as the underlying cursor to enumerate the rows in this vtable. The 
@@ -67,6 +67,20 @@ static int systblTablesDisconnect(sqlite3_vtab *pVtab){
   return SQLITE_OK;
 }
 
+static int checkRowidAccess(systbl_tables_cursor *pCur) {
+  while (pCur->iRowid < thedb->num_dbs) {
+    struct db *pDb = thedb->dbs[pCur->iRowid];
+    char *x = pDb->dbname;
+    int bdberr;
+    struct sql_thread *thd = pthread_getspecific(query_info_key);
+    int rc = bdb_check_user_tbl_access(thedb->bdb_env, thd->sqlclntstate->user, x, ACCESS_READ, &bdberr);
+    if (rc == 0)
+       return SQLITE_OK;
+    pCur->iRowid++;
+  }
+  return SQLITE_OK;
+}
+
 /*
 ** Constructor for systbl_tables_cursor objects.
 */
@@ -77,6 +91,7 @@ static int systblTablesOpen(sqlite3_vtab *p, sqlite3_vtab_cursor **ppCursor){
   if( pCur==0 ) return SQLITE_NOMEM;
   memset(pCur, 0, sizeof(*pCur));
   *ppCursor = &pCur->base;
+  checkRowidAccess(pCur);
   return SQLITE_OK;
 }
 
@@ -93,8 +108,8 @@ static int systblTablesClose(sqlite3_vtab_cursor *cur){
 */
 static int systblTablesNext(sqlite3_vtab_cursor *cur){
   systbl_tables_cursor *pCur = (systbl_tables_cursor*)cur;
-
   pCur->iRowid++;
+  checkRowidAccess(pCur);
   return SQLITE_OK;
 }
 
@@ -193,17 +208,28 @@ int comdb2SystblInit(
   int rc = SQLITE_OK;
 #ifndef SQLITE_OMIT_VIRTUALTABLE
   rc = sqlite3_create_module(db, "comdb2sys_tables", &systblTablesModule, 0);
-  rc = sqlite3_create_module(db, "comdb2sys_columns", &systblColumnsModule, 0);
-  rc = sqlite3_create_module(db, "comdb2sys_keys", &systblKeysModule, 0);
-  rc = sqlite3_create_module(db, "comdb2sys_keycomponents",
+  if (rc == SQLITE_OK)
+    rc = sqlite3_create_module(db, "comdb2sys_columns", &systblColumnsModule, 0);
+  if (rc == SQLITE_OK)
+    rc = sqlite3_create_module(db, "comdb2sys_keys", &systblKeysModule, 0);
+  if (rc == SQLITE_OK)
+    rc = sqlite3_create_module(db, "comdb2sys_keycomponents",
          &systblFieldsModule, 0);
-  rc = sqlite3_create_module(db, "comdb2sys_constraints",
+  if (rc == SQLITE_OK)
+    rc = sqlite3_create_module(db, "comdb2sys_constraints",
          &systblConstraintsModule, 0);
-  rc = sqlite3_create_module(db, "comdb2sys_tablesizes",
+  if (rc == SQLITE_OK)
+    rc = sqlite3_create_module(db, "comdb2sys_tablesizes",
          &systblTblSizeModule, 0);
-  rc = sqlite3_create_module(db, "comdb2sys_procedures",
+  if (rc == SQLITE_OK)
+    rc = sqlite3_create_module(db, "comdb2sys_procedures",
          &systblSPsModule, 0);
-
+  if (rc == SQLITE_OK)
+    rc = sqlite3_create_module(db, "comdb2sys_users",
+         &systblUsersModule, 0);
+  if (rc == SQLITE_OK)
+    rc = sqlite3_create_module(db, "comdb2sys_tablepermissions",
+         &systblTablePermissionsModule, 0);
 #endif
   return rc;
 }

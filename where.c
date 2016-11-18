@@ -2726,7 +2726,7 @@ static int whereLoopAddBtree(
     }
 
     /* COMDB2 MODIFICATION: if index looks like COMDB2_DISABLED_xxx then skip */
-    if(pProbe->zName && strncmp(pProbe->zName, "$COMDB2_DISABLED_", 17) == 0) {
+    if( pProbe->zName && strncmp(pProbe->zName, "$COMDB2_DISABLED_", 17) == 0 ){
  #if WHERETRACE_ENABLED /* 0x8 */
     if( sqlite3WhereTrace&0x4 ){
           sqlite3DebugPrintf("Not using disabled index %s:%s\n", 
@@ -3691,17 +3691,17 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
 #endif 
 
   //planner_effort level 1 is the default
-  if(planner_effort > 1 ) {
-      if(planner_effort < 8 ) 
-          mxChoice += nLoop * planner_effort;
-      else if(planner_effort < 9) 
-          mxChoice += nLoop * nLoop;
-      else if(planner_effort < 10) 
-          mxChoice += nLoop * nLoop * nLoop;
-      else 
-          mxChoice += nLoop * nLoop * nLoop * nLoop;
+  if( planner_effort > 1 ){
+    if( planner_effort < 8 ){
+      mxChoice += nLoop * planner_effort;
+    }else if( planner_effort < 9 ){
+      mxChoice += nLoop * nLoop;
+    }else if( planner_effort < 10 ){
+      mxChoice += nLoop * nLoop * nLoop;
+    }else{
+      mxChoice += nLoop * nLoop * nLoop * nLoop;
+    }
   }
-
   assert( nLoop<=pWInfo->pTabList->nSrc );
   WHERETRACE(0x002, ("---- begin solver.  (nRowEst=%d)\n", nRowEst));
 
@@ -4596,15 +4596,6 @@ WhereInfo *sqlite3WhereBegin(
 
         sqlite3VdbeAddOp3(v, op, iIndexCur, pIx->tnum, iDb);
 
-          /* COMDB2 MODIFICATION */
-          /* TODO: AZ: need to find correct indicator
-          if (sqlite3WhereTrace) {
-            if ((pLoop->wsFlags & WHERE_IDX_ONLY) == 0) {
-              sqlite3VdbeChangeP5(v, 0xff);
-            }
-          }
-          */
-
         sqlite3VdbeSetP4KeyInfo(pParse, pIx);
         if( (pLoop->wsFlags & WHERE_CONSTRAINT)!=0
          && (pLoop->wsFlags & (WHERE_COLUMN_RANGE|WHERE_SKIPSCAN))==0
@@ -4854,4 +4845,3 @@ void sqlite3WhereEnd(WhereInfo *pWInfo){
   whereInfoFree(db, pWInfo);
   return;
 }
-/* vim: set ts=2 sw=2: */

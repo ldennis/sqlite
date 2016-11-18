@@ -444,7 +444,7 @@ do_atof_calc:
   if( e<0 ) {
     esign = -1;
     e *= -1;
-  } else {
+  }else{
     esign = 1;
   }
 

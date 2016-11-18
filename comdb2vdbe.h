@@ -51,4 +51,6 @@ struct rstMsg
 int comdb2GenerateRstMsg(OpFunc *f);
 void free_rstMsg(struct rstMsg* rec);
 
+void resolveTableName(struct SrcList_item *p, char *zDb, char *tablename);
+
 #endif // COMDB2VDBE_H

@@ -5295,7 +5295,7 @@ static int file_control_lasterrno_test(
     Tcl_SetObjResult(interp, Tcl_NewIntObj(rc)); 
     return TCL_ERROR; 
   }
-  if( iArg!=0 ) {
+  if( iArg!=0 ){
     Tcl_AppendResult(interp, "Unexpected non-zero errno: ",
                      Tcl_GetStringFromObj(Tcl_NewIntObj(iArg), 0), " ", 0);
     return TCL_ERROR;

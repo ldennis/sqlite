@@ -8,12 +8,13 @@ extern pthread_key_t query_info_key;
 
 inline int initOpFunc(OpFunc* o, size_t len)
 {
-    assert(o != NULL);
+    assert( o != NULL );
     
-    if (len > 0)
+    if( len > 0 ){
         o->buf = o->readNext = o->writeNext = malloc(len);
-    else
+    }else{
         o->buf = o->readNext = o->writeNext = NULL;
+    }
     o->len = len;
     o->end = o->buf + o->len;
     return o->buf == NULL;
@@ -75,7 +76,7 @@ static inline void shallowFreeOpFuncSetup(OpFuncSetup* stp)
 }
 
 static int   OPFUNC_NOROWS_NCOLS = 0;
-static char* OPFUNC_NOROWS_COLNAMES[] = {};
+static const char* OPFUNC_NOROWS_COLNAMES[] = {};
 static int   OPFUNC_NOROWS_COLTYPES[] = {};
 static size_t   OPFUNC_NOROWS_BUFSIZE = 0;
 
@@ -96,7 +97,7 @@ static inline OpFuncSetup* getNoRowsSetup()
 
 
 static int   OPFUNC_RSTMSG_NCOLS = 2;
-static char* OPFUNC_RSTMSG_COLNAMES[] = {"Return Code", "Message"};
+static const char* OPFUNC_RSTMSG_COLNAMES[] = {"Return Code", "Message"};
 static int   OPFUNC_RSTMSG_COLTYPES[] = {OPFUNC_INT_TYPE, OPFUNC_STRING_TYPE};
 static size_t   OPFUNC_RSTMSG_BUFSIZE = 255;
 
@@ -116,7 +117,7 @@ static inline OpFuncSetup* getRstMsgSetup()
 }
 
 static int   OPFUNC_SSTRING_NCOLS = 1;
-static char* OPFUNC_SSTRING_COLNAMES[] = {"Message"};
+static const char* OPFUNC_SSTRING_COLNAMES[] = {"Message"};
 static int   OPFUNC_SSTRING_COLTYPES[] = {OPFUNC_STRING_TYPE};
 static size_t   OPFUNC_SSTRING_BUFSIZE = 255;
 

@@ -58,9 +58,13 @@ void sqlite3OpenTable(
     VdbeComment((v, "%s", pTab->zName));
   }
 
-  /* COMDB2: Open Cursor locks the table, verify cookie after we have opened the cursor */
-  if (iDb != 1)
-      sqlite3VdbeAddTable(v,pTab);
+  /*
+  ** COMDB2: Open Cursor locks the table, verify cookie after we have
+  ** opened the cursor
+  */
+  if( iDb != 1 ){
+    sqlite3VdbeAddTable(v,pTab);
+  }
 
 }
 
@@ -1455,7 +1459,7 @@ void sqlite3GenerateConstraintChecks(
         if( pTrigger || sqlite3FkRequired(pParse, pTab, 0, 0) ){
           sqlite3MultiWrite(pParse);
           sqlite3GenerateRowDelete(pParse, pTab, pTrigger, iDataCur, iIdxCur,
-                                   regNewData, 1, 0, OE_Replace, ONEPASS_SINGLE, -1);
+                regNewData, 1, 0, OE_Replace, ONEPASS_SINGLE, -1);
         }else{
 #ifdef SQLITE_ENABLE_PREUPDATE_HOOK
           if( HasRowid(pTab) ){
@@ -1817,6 +1821,8 @@ int sqlite3OpenTableAndIndices(
         sqlite3VdbeChangeP5(v, p5);
       }
     }
+  }else{
+    i = 0;
   }
 
   if( iBase>pParse->nTab ) pParse->nTab = iBase;

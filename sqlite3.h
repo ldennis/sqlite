@@ -434,7 +434,8 @@ SQLITE_API int SQLITE_STDCALL sqlite3_exec(
 #define SQLITE_NOTADB      26   /* File opened that is not a database file */
 #define SQLITE_NOTICE      27   /* Notifications from sqlite3_log() */
 #define SQLITE_WARNING     28   /* Warnings from sqlite3_log() */
-#define SQLITE_SCHEMA_REMOTE  50 /* when a distributed schema has inconsistent local cache */
+#define SQLITE_SCHEMA_REMOTE 50 /* when a distributed schema has
+                                   inconsistent local cache */
 #define SQLITE_ROW         100  /* sqlite3_step() has another row ready */
 #define SQLITE_DONE        101  /* sqlite3_step() has finished executing */
 

@@ -212,8 +212,7 @@ int sqlite3GetToken(const unsigned char *z, int *tokenType){
     }
     case CC_LB: {
       i = 1;
-      while (z[i] != 0)
-        ++i;
+      while( z[i] != 0 ){ ++i; }
       if (z[i - 1] == '}')
         *tokenType = TK_NOSQL;
       else

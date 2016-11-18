@@ -2053,7 +2053,7 @@ static int nolockUnlock(sqlite3_file *NotUsed, int NotUsed2){
 /*
 ** Close the file.
 */
-static int nolockClose(sqlite3_file *id) {
+static int nolockClose(sqlite3_file *id){
   return closeUnixFile(id);
 }
 
@@ -2098,7 +2098,7 @@ static int nolockClose(sqlite3_file *id) {
 ** variation of CheckReservedLock(), *pResOut is set to true if any lock
 ** is held on the file and false if the file is unlocked.
 */
-static int dotlockCheckReservedLock(sqlite3_file *id, int *pResOut) {
+static int dotlockCheckReservedLock(sqlite3_file *id, int *pResOut){
   int rc = SQLITE_OK;
   int reserved = 0;
   unixFile *pFile = (unixFile*)id;
@@ -2139,7 +2139,7 @@ static int dotlockCheckReservedLock(sqlite3_file *id, int *pResOut) {
 ** With dotfile locking, we really only support state (4): EXCLUSIVE.
 ** But we track the other locking levels internally.
 */
-static int dotlockLock(sqlite3_file *id, int eFileLock) {
+static int dotlockLock(sqlite3_file *id, int eFileLock){
   unixFile *pFile = (unixFile*)id;
   char *zLockFile = (char *)pFile->lockingContext;
   int rc = SQLITE_OK;
@@ -2166,7 +2166,7 @@ static int dotlockLock(sqlite3_file *id, int eFileLock) {
     int tErrno = errno;
     if( EEXIST == tErrno ){
       rc = SQLITE_BUSY;
-    } else {
+    }else{
       rc = sqliteErrorFromPosixError(tErrno, SQLITE_IOERR_LOCK);
       if( rc!=SQLITE_BUSY ){
         storeLastErrno(pFile, tErrno);
@@ -2189,7 +2189,7 @@ static int dotlockLock(sqlite3_file *id, int eFileLock) {
 **
 ** When the locking level reaches NO_LOCK, delete the lock file.
 */
-static int dotlockUnlock(sqlite3_file *id, int eFileLock) {
+static int dotlockUnlock(sqlite3_file *id, int eFileLock){
   unixFile *pFile = (unixFile*)id;
   char *zLockFile = (char *)pFile->lockingContext;
   int rc;
@@ -2299,14 +2299,14 @@ static int flockCheckReservedLock(sqlite3_file *id, int *pResOut){
     if( !lrc ){
       /* got the lock, unlock it */
       lrc = robust_flock(pFile->h, LOCK_UN);
-      if ( lrc ) {
+      if( lrc ){
         int tErrno = errno;
         /* unlock failed with an error */
         lrc = SQLITE_IOERR_UNLOCK; 
         storeLastErrno(pFile, tErrno);
         rc = lrc;
       }
-    } else {
+    }else{
       int tErrno = errno;
       reserved = 1;
       /* someone else might have it reserved */
@@ -2358,7 +2358,7 @@ static int flockCheckReservedLock(sqlite3_file *id, int *pResOut){
 ** This routine will only increase a lock.  Use the sqlite3OsUnlock()
 ** routine to lower a locking level.
 */
-static int flockLock(sqlite3_file *id, int eFileLock) {
+static int flockLock(sqlite3_file *id, int eFileLock){
   int rc = SQLITE_OK;
   unixFile *pFile = (unixFile*)id;
 
@@ -2366,21 +2366,21 @@ static int flockLock(sqlite3_file *id, int eFileLock) {
 
   /* if we already have a lock, it is exclusive.  
   ** Just adjust level and punt on outta here. */
-  if (pFile->eFileLock > NO_LOCK) {
+  if( pFile->eFileLock > NO_LOCK ){
     pFile->eFileLock = eFileLock;
     return SQLITE_OK;
   }
   
   /* grab an exclusive lock */
   
-  if (robust_flock(pFile->h, LOCK_EX | LOCK_NB)) {
+  if( robust_flock(pFile->h, LOCK_EX | LOCK_NB) ){
     int tErrno = errno;
     /* didn't get, must be busy */
     rc = sqliteErrorFromPosixError(tErrno, SQLITE_IOERR_LOCK);
     if( IS_LOCK_ERROR(rc) ){
       storeLastErrno(pFile, tErrno);
     }
-  } else {
+  }else{
     /* got it, set the type and return ok */
     pFile->eFileLock = eFileLock;
   }
@@ -2402,7 +2402,7 @@ static int flockLock(sqlite3_file *id, int eFileLock) {
 ** If the locking level of the file descriptor is already at or below
 ** the requested locking level, this routine is a no-op.
 */
-static int flockUnlock(sqlite3_file *id, int eFileLock) {
+static int flockUnlock(sqlite3_file *id, int eFileLock){
   unixFile *pFile = (unixFile*)id;
   
   assert( pFile );
@@ -2416,7 +2416,7 @@ static int flockUnlock(sqlite3_file *id, int eFileLock) {
   }
   
   /* shared can just be set because we always have an exclusive */
-  if (eFileLock==SHARED_LOCK) {
+  if( eFileLock==SHARED_LOCK ){
     pFile->eFileLock = eFileLock;
     return SQLITE_OK;
   }
@@ -2465,7 +2465,7 @@ static int flockClose(sqlite3_file *id) {
 ** to a non-zero value otherwise *pResOut is set to zero.  The return value
 ** is set to SQLITE_OK unless an I/O error occurs during lock checking.
 */
-static int semXCheckReservedLock(sqlite3_file *id, int *pResOut) {
+static int semXCheckReservedLock(sqlite3_file *id, int *pResOut){
   int rc = SQLITE_OK;
   int reserved = 0;
   unixFile *pFile = (unixFile*)id;
@@ -2488,7 +2488,7 @@ static int semXCheckReservedLock(sqlite3_file *id, int *pResOut) {
       if( EAGAIN != tErrno ){
         rc = sqliteErrorFromPosixError(tErrno, SQLITE_IOERR_CHECKRESERVEDLOCK);
         storeLastErrno(pFile, tErrno);
-      } else {
+      }else{
         /* someone else has the lock when we are in NO_LOCK */
         reserved = (pFile->eFileLock < SHARED_LOCK);
       }
@@ -2532,14 +2532,14 @@ static int semXCheckReservedLock(sqlite3_file *id, int *pResOut) {
 ** This routine will only increase a lock.  Use the sqlite3OsUnlock()
 ** routine to lower a locking level.
 */
-static int semXLock(sqlite3_file *id, int eFileLock) {
+static int semXLock(sqlite3_file *id, int eFileLock){
   unixFile *pFile = (unixFile*)id;
   sem_t *pSem = pFile->pInode->pSem;
   int rc = SQLITE_OK;
 
   /* if we already have a lock, it is exclusive.  
   ** Just adjust level and punt on outta here. */
-  if (pFile->eFileLock > NO_LOCK) {
+  if( pFile->eFileLock > NO_LOCK ){
     pFile->eFileLock = eFileLock;
     rc = SQLITE_OK;
     goto sem_end_lock;
@@ -2565,7 +2565,7 @@ static int semXLock(sqlite3_file *id, int eFileLock) {
 ** If the locking level of the file descriptor is already at or below
 ** the requested locking level, this routine is a no-op.
 */
-static int semXUnlock(sqlite3_file *id, int eFileLock) {
+static int semXUnlock(sqlite3_file *id, int eFileLock){
   unixFile *pFile = (unixFile*)id;
   sem_t *pSem = pFile->pInode->pSem;
 
@@ -2581,13 +2581,13 @@ static int semXUnlock(sqlite3_file *id, int eFileLock) {
   }
   
   /* shared can just be set because we always have an exclusive */
-  if (eFileLock==SHARED_LOCK) {
+  if( eFileLock==SHARED_LOCK ){
     pFile->eFileLock = eFileLock;
     return SQLITE_OK;
   }
   
   /* no, really unlock. */
-  if ( sem_post(pSem)==-1 ) {
+  if( sem_post(pSem)==-1 ){
     int rc, tErrno = errno;
     rc = sqliteErrorFromPosixError(tErrno, SQLITE_IOERR_UNLOCK);
     if( IS_LOCK_ERROR(rc) ){
@@ -2602,7 +2602,7 @@ static int semXUnlock(sqlite3_file *id, int eFileLock) {
 /*
  ** Close a file.
  */
-static int semXClose(sqlite3_file *id) {
+static int semXClose(sqlite3_file *id){
   if( id ){
     unixFile *pFile = (unixFile*)id;
     semXUnlock(id, NO_LOCK);
@@ -2681,7 +2681,7 @@ static int afpSetLock(
     (setLockFlag?"ON":"OFF"), pFile->h, (pb.fd==-1?"[testval-1]":""),
     offset, length));
   err = fsctl(path, afpfsByteRangeLock2FSCTL, &pb, 0);
-  if ( err==-1 ) {
+  if( err==-1 ){
     int rc;
     int tErrno = errno;
     OSTRACE(("AFPSETLOCK failed to fsctl() '%s' %d %s\n",
@@ -2696,7 +2696,7 @@ static int afpSetLock(
       storeLastErrno(pFile, tErrno);
     }
     return rc;
-  } else {
+  }else{
     return SQLITE_OK;
   }
 }
@@ -2737,7 +2737,7 @@ static int afpCheckReservedLock(sqlite3_file *id, int *pResOut){
       /* if we succeeded in taking the reserved lock, unlock it to restore
       ** the original state */
       lrc = afpSetLock(context->dbPath, pFile, RESERVED_BYTE, 1, 0);
-    } else {
+    }else{
       /* if we failed to get the lock then someone else must have it */
       reserved = 1;
     }
@@ -2846,7 +2846,7 @@ static int afpLock(sqlite3_file *id, int eFileLock){
   ){
     int failed;
     failed = afpSetLock(context->dbPath, pFile, PENDING_BYTE, 1, 1);
-    if (failed) {
+    if( failed ){
       rc = failed;
       goto afp_end_lock;
     }
@@ -2875,16 +2875,16 @@ static int afpLock(sqlite3_file *id, int eFileLock){
     /* Drop the temporary PENDING lock */
     lrc2 = afpSetLock(context->dbPath, pFile, PENDING_BYTE, 1, 0);
     
-    if( IS_LOCK_ERROR(lrc1) ) {
+    if( IS_LOCK_ERROR(lrc1) ){
       storeLastErrno(pFile, lrc1Errno);
       rc = lrc1;
       goto afp_end_lock;
-    } else if( IS_LOCK_ERROR(lrc2) ){
+    }else if( IS_LOCK_ERROR(lrc2) ){
       rc = lrc2;
       goto afp_end_lock;
-    } else if( lrc1 != SQLITE_OK ) {
+    }else if( lrc1 != SQLITE_OK ){
       rc = lrc1;
-    } else {
+    }else{
       pFile->eFileLock = SHARED_LOCK;
       pInode->nLock++;
       pInode->nShared = 1;
@@ -2900,14 +2900,14 @@ static int afpLock(sqlite3_file *id, int eFileLock){
     */
     int failed = 0;
     assert( 0!=pFile->eFileLock );
-    if (eFileLock >= RESERVED_LOCK && pFile->eFileLock < RESERVED_LOCK) {
+    if( eFileLock >= RESERVED_LOCK && pFile->eFileLock < RESERVED_LOCK ){
         /* Acquire a RESERVED lock */
         failed = afpSetLock(context->dbPath, pFile, RESERVED_BYTE, 1,1);
       if( !failed ){
         context->reserved = 1;
       }
     }
-    if (!failed && eFileLock == EXCLUSIVE_LOCK) {
+    if( !failed && eFileLock == EXCLUSIVE_LOCK ){
       /* Acquire an EXCLUSIVE lock */
         
       /* Remove the shared lock before trying the range.  we'll need to 
@@ -2959,7 +2959,7 @@ afp_end_lock:
 ** If the locking level of the file descriptor is already at or below
 ** the requested locking level, this routine is a no-op.
 */
-static int afpUnlock(sqlite3_file *id, int eFileLock) {
+static int afpUnlock(sqlite3_file *id, int eFileLock){
   int rc = SQLITE_OK;
   unixFile *pFile = (unixFile*)id;
   unixInodeInfo *pInode;
@@ -3008,7 +3008,7 @@ static int afpUnlock(sqlite3_file *id, int eFileLock) {
         /* only re-establish the shared lock if necessary */
         int sharedLockByte = SHARED_FIRST+pInode->sharedByte;
         rc = afpSetLock(context->dbPath, pFile, sharedLockByte, 1, 1);
-      } else {
+      }else{
         skipShared = 1;
       }
     }
@@ -3062,7 +3062,7 @@ static int afpUnlock(sqlite3_file *id, int eFileLock) {
 /*
 ** Close a file & cleanup AFP specific locking context 
 */
-static int afpClose(sqlite3_file *id) {
+static int afpClose(sqlite3_file *id){
   int rc = SQLITE_OK;
   unixFile *pFile = (unixFile*)id;
   assert( id!=0 );
@@ -3910,11 +3910,11 @@ static int unixSectorSize(sqlite3_file *id){
     /* Set defaults for non-supported filesystems */
     pFile->sectorSize = SQLITE_DEFAULT_SECTOR_SIZE;
     pFile->deviceCharacteristics = 0;
-    if( fstatvfs(pFile->h, &fsInfo) == -1 ) {
+    if( fstatvfs(pFile->h, &fsInfo) == -1 ){
       return pFile->sectorSize;
     }
 
-    if( !strcmp(fsInfo.f_basetype, "tmp") ) {
+    if( !strcmp(fsInfo.f_basetype, "tmp") ){
       pFile->sectorSize = fsInfo.f_bsize;
       pFile->deviceCharacteristics =
         SQLITE_IOCAP_ATOMIC4K |       /* All ram filesystem writes are atomic */
@@ -5177,10 +5177,10 @@ static const sqlite3_io_methods *autolockIoFinderImpl(
   lockInfo.l_start = 0;
   lockInfo.l_whence = SEEK_SET;
   lockInfo.l_type = F_RDLCK;
-  if( osFcntl(pNew->h, F_GETLK, &lockInfo)!=-1 ) {
+  if( osFcntl(pNew->h, F_GETLK, &lockInfo)!=-1 ){
     if( strcmp(fsInfo.f_fstypename, "nfs")==0 ){
       return &nfsIoMethods;
-    } else {
+    }else{
       return &posixIoMethods;
     }
   }else{
@@ -5217,7 +5217,7 @@ static const sqlite3_io_methods *vxworksIoFinderImpl(
   lockInfo.l_start = 0;
   lockInfo.l_whence = SEEK_SET;
   lockInfo.l_type = F_RDLCK;
-  if( osFcntl(pNew->h, F_GETLK, &lockInfo)!=-1 ) {
+  if( osFcntl(pNew->h, F_GETLK, &lockInfo)!=-1 ){
     return &posixIoMethods;
   }else{
     return &semIoMethods;
@@ -5828,10 +5828,10 @@ static int unixOpen(
     robust_close(p, fd, __LINE__);
     return SQLITE_IOERR_ACCESS;
   }
-  if (0 == strncmp("msdos", fsInfo.f_fstypename, 5)) {
+  if( 0 == strncmp("msdos", fsInfo.f_fstypename, 5)){
     ((unixFile*)pFile)->fsFlags |= SQLITE_FSFLAGS_IS_MSDOS;
   }
-  if (0 == strncmp("exfat", fsInfo.f_fstypename, 5)) {
+  if( 0 == strncmp("exfat", fsInfo.f_fstypename, 5)){
     ((unixFile*)pFile)->fsFlags |= SQLITE_FSFLAGS_IS_MSDOS;
   }
 #endif
@@ -6531,7 +6531,7 @@ static int proxyCreateLockPath(const char *lockPath){
         buf[i]='\0';
         if( osMkdir(buf, SQLITE_DEFAULT_PROXYDIR_PERMISSIONS) ){
           int err=errno;
-          if( err!=EEXIST ) {
+          if( err!=EEXIST ){
             OSTRACE(("CREATELOCKPATH  FAILED creating %s, "
                      "'%s' proxy lock path=%s pid=%d\n",
                      buf, strerror(err), lockPath, osGetpid(0)));
@@ -6558,7 +6558,7 @@ static int proxyCreateUnixFile(
     const char *path,        /* path for the new unixFile */
     unixFile **ppFile,       /* unixFile created and returned by ref */
     int islockfile           /* if non zero missing dirs will be created */
-) {
+){
   int fd = -1;
   unixFile *pNew;
   int rc = SQLITE_OK;
@@ -6600,7 +6600,7 @@ static int proxyCreateUnixFile(
     if( islockfile ){
       return SQLITE_BUSY;
     }
-    switch (terrno) {
+    switch( terrno ){
       case EACCES:
         return SQLITE_PERM;
       case EIO: 
@@ -6934,7 +6934,7 @@ static int proxyTakeConch(unixFile *pFile){
           /* We are trying for an exclusive lock but another thread in this
            ** same process is still holding a shared lock. */
           rc = SQLITE_BUSY;
-        } else {          
+        }else{
           rc = proxyConchLock(pFile, myHostID, EXCLUSIVE_LOCK);
         }
       }else{
@@ -6976,7 +6976,7 @@ static int proxyTakeConch(unixFile *pFile){
               int code = errno;
               fprintf(stderr, "fchmod %o FAILED with %d %s\n",
                       cmode, code, strerror(code));
-            } else {
+            }else{
               fprintf(stderr, "fchmod %o SUCCEDED\n",cmode);
             }
           }else{
@@ -7037,7 +7037,7 @@ static int proxyTakeConch(unixFile *pFile){
           afpCtx = (afpLockingContext *)pCtx->lockProxy->lockingContext;
           afpCtx->dbPath = pCtx->lockProxyPath;
         }
-      } else {
+      }else{
         conchFile->pMethod->xUnlock((sqlite3_file*)conchFile, NO_LOCK);
       }
       OSTRACE(("TAKECONCH  %d %s\n", conchFile->h,
@@ -7118,7 +7118,7 @@ static int proxyCreateConchPathname(char *dbPath, char **pConchPath){
 /* Takes a fully configured proxy locking-style unix file and switches
 ** the local lock file path 
 */
-static int switchLockProxyPath(unixFile *pFile, const char *path) {
+static int switchLockProxyPath(unixFile *pFile, const char *path){
   proxyLockingContext *pCtx = (proxyLockingContext*)pFile->lockingContext;
   char *oldPath = pCtx->lockProxyPath;
   int rc = SQLITE_OK;
@@ -7185,7 +7185,7 @@ static int proxyGetDbPathForUnixFile(unixFile *pFile, char *dbPath){
 **  ->lockingContext
 **  ->pMethod
 */
-static int proxyTransformUnixFile(unixFile *pFile, const char *path) {
+static int proxyTransformUnixFile(unixFile *pFile, const char *path){
   proxyLockingContext *pCtx;
   char dbPath[MAXPATHLEN+1];       /* Name of the database file */
   char *lockPath=NULL;
@@ -7223,7 +7223,7 @@ static int proxyTransformUnixFile(unixFile *pFile, const char *path) {
       struct stat conchInfo;
       int goLockless = 0;
 
-      if( osStat(pCtx->conchFilePath, &conchInfo) == -1 ) {
+      if( osStat(pCtx->conchFilePath, &conchInfo) == -1 ){
         int err = errno;
         if( (err==ENOENT) && (statfs(dbPath, &fsInfo) != -1) ){
           goLockless = (fsInfo.f_flags&MNT_RDONLY) == MNT_RDONLY;
@@ -7284,7 +7284,7 @@ static int proxyFileControl(sqlite3_file *id, int op, void *pArg){
         }else{
           *(const char **)pArg = ":auto: (not held)";
         }
-      } else {
+      }else{
         *(const char **)pArg = NULL;
       }
       return SQLITE_OK;
@@ -7345,7 +7345,7 @@ static int proxyFileControl(sqlite3_file *id, int op, void *pArg){
 ** to a non-zero value otherwise *pResOut is set to zero.  The return value
 ** is set to SQLITE_OK unless an I/O error occurs during lock checking.
 */
-static int proxyCheckReservedLock(sqlite3_file *id, int *pResOut) {
+static int proxyCheckReservedLock(sqlite3_file *id, int *pResOut){
   unixFile *pFile = (unixFile*)id;
   int rc = proxyTakeConch(pFile);
   if( rc==SQLITE_OK ){
@@ -7384,7 +7384,7 @@ static int proxyCheckReservedLock(sqlite3_file *id, int *pResOut) {
 ** This routine will only increase a lock.  Use the sqlite3OsUnlock()
 ** routine to lower a locking level.
 */
-static int proxyLock(sqlite3_file *id, int eFileLock) {
+static int proxyLock(sqlite3_file *id, int eFileLock){
   unixFile *pFile = (unixFile*)id;
   int rc = proxyTakeConch(pFile);
   if( rc==SQLITE_OK ){
@@ -7408,7 +7408,7 @@ static int proxyLock(sqlite3_file *id, int eFileLock) {
 ** If the locking level of the file descriptor is already at or below
 ** the requested locking level, this routine is a no-op.
 */
-static int proxyUnlock(sqlite3_file *id, int eFileLock) {
+static int proxyUnlock(sqlite3_file *id, int eFileLock){
   unixFile *pFile = (unixFile*)id;
   int rc = proxyTakeConch(pFile);
   if( rc==SQLITE_OK ){

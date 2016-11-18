@@ -59,13 +59,13 @@ void comdb2SetWriteFlag(int wrflag);
 */
 void getRowid(BtCursor *pCursor, i64 rowid, u8 p3, Mem *pOut)
 {
-  if (p3 == 0) {
+  if( p3 == 0 ){
       pOut->u.i = rowid;
       MemSetTypeFlag(pOut, MEM_Int);
       return;
   }
 
-  if (p3 == 1) {
+  if( p3 == 1 ){
     sqlite3BtreeRecordIDString(pCursor, rowid, &pOut->z, 0);
     pOut->n = strlen(pOut->z);
     pOut->enc=SQLITE_UTF8;
@@ -74,7 +74,7 @@ void getRowid(BtCursor *pCursor, i64 rowid, u8 p3, Mem *pOut)
     return;
   }
 
-  if (p3 == 2) {
+  if( p3 == 2 ){
     /* no need to malloc the comdb2_rowid.
     ** it will be converted to datetime anyway.
     ** Do conversion in temp buffer
@@ -87,14 +87,14 @@ void getRowid(BtCursor *pCursor, i64 rowid, u8 p3, Mem *pOut)
     outstr = buf;
     sqlite3BtreeRecordIDString(pCursor, rowid, &outstr, sizeof(buf));
     s = strchr(outstr, ':');
-    if (s == NULL) {
+    if( s == NULL ){
       MemSetTypeFlag(pOut, MEM_Null);
       return;
     }
 
     s++;
     genid = strtoull(s, NULL, 10);
-    if (genid == 0) {
+    if( genid == 0 ){
       MemSetTypeFlag(pOut, MEM_Null);
       return;
     }
@@ -675,100 +675,104 @@ static int checkSavepointCount(sqlite3 *db){
 #endif
 
 /* COMDB2 MODIFICATION */
-void dump_sqlite_mem(Mem *m) {
-    printf("flags %08x ", m->flags);
-    //TODO: old: printf("flags %08x type %d ", m->flags, m->type);
-    if (m->flags & MEM_Null) {
-        printf("null ");
+void dump_sqlite_mem(Mem *m){
+  printf("flags %08x ", m->flags);
+  //TODO: old: printf("flags %08x type %d ", m->flags, m->type);
+  if( m->flags & MEM_Null) {
+    printf("null ");
+  }
+  if( m->flags & MEM_Int) {
+    printf("int %lld %016llx", m->u.i, m->u.i);
+  }else if( m->flags & MEM_Real ){
+    printf("real %f", m->u.r);
+  }else if( m->flags & MEM_Str ){
+    printf("string \"%.*s\"", m->n, m->z);
+  }else if( m->flags & MEM_Datetime ){
+    if (m->du.dt.dttz_prec == DTTZ_PREC_MSEC)
+      printf("datetime ");
+    else
+      printf("datetimeus ");
+  }else if( m->flags & MEM_Interval ){
+    switch( m->du.tv.type ){
+      case INTV_YM_TYPE: {
+	printf("intervalym ");
+	break;
+      }
+      case INTV_DS_TYPE: {
+	printf("intervalds ");
+	break;
+      }
+      case INTV_DSUS_TYPE: {
+	printf("intervaldsus ");
+	break;
+      }
+      case INTV_DECIMAL_TYPE: {
+	printf("decimal ");
+	break;
+      }
+      default: {
+	printf("???interval??? ");
+	break;
+      }
     }
-    if (m->flags & MEM_Int) {
-        printf("int %lld %016llx", m->u.i, m->u.i);
-    }
-    else if (m->flags & MEM_Real) {
-        printf("real %f", m->u.r);
-    }
-    else if (m->flags & MEM_Str) {
-        printf("string \"%.*s\"", m->n, m->z);
-    }
-    else if (m->flags & MEM_Datetime) {
-        if (m->du.dt.dttz_prec == DTTZ_PREC_MSEC)
-            printf("datetime ");
-        else
-            printf("datetimeus ");
-    }
-    else if (m->flags & MEM_Interval) {
-        switch(m->du.tv.type)
-        {
-          case INTV_YM_TYPE:
-            printf("intervalym ");
-            break;
-          case INTV_DS_TYPE:
-            printf("intervalds ");
-            break;
-          case INTV_DSUS_TYPE:
-            printf("intervaldsus ");
-            break;
-          case INTV_DECIMAL_TYPE:
-            printf("decimal ");
-            break;
-          default:
-            printf("???interval??? ");
-            break;
-        }
-    }
-    else if (m->flags & MEM_Blob) {
-        printf("blob: \n");
-    }
-    printf("\n");
+  }else if( m->flags & MEM_Blob ){
+    printf("blob: \n");
+  }
+  printf("\n");
 }
 
 /* COMDB2 MODIFICATION */
 int gbl_debug_sql_opcodes = 0;
 
-void dump_vdbe_mem(FILE *f, Mem *m) {
-    //TODO: old: fprintf(f, "type %d ", m->type);
-    if (m->flags & MEM_Null)
-        fprintf(f, "NULL");
-    else if (m->flags & MEM_Str)
-        fprintf(f, "string: \"%.*s\"", m->n, m->z);
-    else if (m->flags & MEM_Int)
-        fprintf(f, "int: %lld", m->u.i);
-    else if (m->flags & MEM_Real)
-        fprintf(f, "double: %f", m->u.r);
-    else if (m->flags & MEM_Datetime) {
-        char ctimebuf[30] = "";
-        time_t ts;
-        ts = (int) m->du.dt.dttz_sec;
-        ctime_r(&ts, ctimebuf);
-        if (m->du.dt.dttz_prec == DTTZ_PREC_MSEC)
-            fprintf(f, "datetime: epoch %lld msec %u \"%s\"", m->du.dt.dttz_sec, m->du.dt.dttz_frac, ctimebuf);
-        else
-            fprintf(f, "datetime: epoch %lld usec %u \"%s\"", m->du.dt.dttz_sec, m->du.dt.dttz_frac, ctimebuf);
+void dump_vdbe_mem(FILE *f, Mem *m){
+  //TODO: old: fprintf(f, "type %d ", m->type);
+  if( m->flags & MEM_Null ){
+    fprintf(f, "NULL");
+  }else if( m->flags & MEM_Str ){
+    fprintf(f, "string: \"%.*s\"", m->n, m->z);
+  }else if( m->flags & MEM_Int ){
+    fprintf(f, "int: %lld", m->u.i);
+  }else if( m->flags & MEM_Real ){
+    fprintf(f, "double: %f", m->u.r);
+  }else if( m->flags & MEM_Datetime){
+    char ctimebuf[30] = "";
+    time_t ts;
+    ts = (int) m->du.dt.dttz_sec;
+    ctime_r(&ts, ctimebuf);
+    if( m->du.dt.dttz_prec == DTTZ_PREC_MSEC ){
+      fprintf(f, "datetime: epoch %lld msec %u \"%s\"",
+	    m->du.dt.dttz_sec, m->du.dt.dttz_frac, ctimebuf);
+    }else{
+      fprintf(f, "datetime: epoch %lld usec %u \"%s\"",
+	    m->du.dt.dttz_sec, m->du.dt.dttz_frac, ctimebuf);
     }
-    else if (m->flags & MEM_Interval) {
-        fprintf(f, "interval: type %u", m->du.tv.type);
+  }else if( m->flags & MEM_Interval ){
+    fprintf(f, "interval: type %u", m->du.tv.type);
+  }else{
+    fprintf(f, "unknown type, flags %x", (int) m->flags);
+  }
+  fprintf(f, " encoding: ");
+  switch( m->enc ){
+    case SQLITE_UTF8: {
+      fprintf(f, "UTF8");
+      break;
     }
-    else {
-        fprintf(f, "unknown type, flags %x", (int) m->flags);
+    case SQLITE_UTF16LE: {
+      fprintf(f, "UTF16(le)");
+      break;
     }
-    fprintf(f, " encoding: ");
-    switch (m->enc) {
-        case SQLITE_UTF8:
-            fprintf(f, "UTF8");
-            break;
-        case SQLITE_UTF16LE:
-            fprintf(f, "UTF16(le)");
-            break;
-        case SQLITE_UTF16BE:
-            fprintf(f, "UTF16(be)");
-            break;
-        default:
-            fprintf(f, "unknown");
-            break;
+    case SQLITE_UTF16BE: {
+      fprintf(f, "UTF16(be)");
+      break;
     }
-    fprintf(f, " cleanupfunc: 0x%p", m->xDel);
-    fprintf(f, " tz: \"%s\"", m->tz);
-    fprintf(f, "\n");
+    default: {
+      fprintf(f, "unknown");
+      break;
+    }
+  }
+  fprintf(f, " cleanupfunc: 0x%p", m->xDel);
+  fprintf(f, " tz: \"%s\"", m->tz);
+  fprintf(f, "\n");
 }
 
 
@@ -1005,7 +1009,7 @@ int sqlite3VdbeExec(
 ** will be filled with #defines that give unique integer values to each
 ** opcode and the opcodes.c file is filled with an array of strings where
 ** each string is the symbolic name for the corresponding opcode.  If the
-** case statement is followed by a comment of the form "/# same as ... #
+** case statement is followed by a comment of the form "/# same as ... #/"
 ** that comment is used to determine the particular value of the opcode.
 **
 ** Other keywords in the comment that follows each case are used to
@@ -1826,23 +1830,26 @@ case OP_Remainder: {           /* same as TK_REM, in1, in2, out3 */
     Mem res;
     rc = sqlite3VdbeMemIntervalAndInt(pIn2, pIn1, pOp->opcode, &res);
     *pOut = res; /*knowledge of _operateIntervalandInterval is assumed, no dyn alloc */
-  }else if( (pIn2->flags & MEM_Int) && (pIn1->flags & MEM_Interval)  &&
-            (pOp->opcode == OP_Multiply)) { 
+  }else if( (pIn2->flags & MEM_Int) && (pIn1->flags & MEM_Interval)
+   && (pOp->opcode == OP_Multiply)
+  ){
   
     /* int and interval */
     Mem res;
     rc = sqlite3VdbeMemIntAndInterval(pIn2, pIn1, pOp->opcode, &res);
     *pOut = res; /*knowledge of _operateIntervalandInterval is assumed, no dyn alloc */
   }
-  else if( (pIn2->flags & MEM_Datetime) && (pIn1->flags & MEM_Datetime)  &&
-            (pOp->opcode == OP_Subtract)) { 
+  else if( (pIn2->flags & MEM_Datetime) && (pIn1->flags & MEM_Datetime)
+   && (pOp->opcode == OP_Subtract)
+  ){
   
     /* two datetimes*/
     Mem res;
     rc = sqlite3VdbeMemDatetimeAndDatetime(pIn2, pIn1, pOp->opcode, &res);
     *pOut = res; /*knowledge of _operateIntervalandInterval is assumed, no dyn alloc */
-  }else if( (pIn2->flags & MEM_Datetime) && (pIn1->flags & MEM_Interval)  &&
-            ((pOp->opcode == OP_Add) || (pOp->opcode == OP_Subtract))) { 
+  }else if( (pIn2->flags & MEM_Datetime) && (pIn1->flags & MEM_Interval)
+   && ((pOp->opcode == OP_Add) || (pOp->opcode == OP_Subtract))
+  ){
   
     /* datetime and interval*/
     Mem res;
@@ -2071,11 +2078,12 @@ case OP_Function: {
   /* Copy the result of the function into register P3 */
   if( pOut->flags & (MEM_Str|MEM_Blob) ){
     sqlite3VdbeChangeEncoding(pCtx->pOut, encoding);
-    /* COMDB2 MODIFICATION -- above operations wipe the pOut->db sometimes */
-    if( !pCtx->pOut->db ){
-      pCtx->pOut->db = db;
-    }
     if( sqlite3VdbeMemTooBig(pCtx->pOut) ) goto too_big;
+  }
+
+  /* COMDB2 MODIFICATION -- above operations wipe the pOut->db sometimes */
+  if( !pCtx->pOut->db ){
+    pCtx->pOut->db = db;
   }
 
   REGISTER_TRACE(pOp->p3, pCtx->pOut);
@@ -3100,7 +3108,7 @@ case OP_Affinity: {
     assert( pIn1 <= &p->aMem[(p->nMem+1 - p->nCursor)] );
     assert( memIsValid(pIn1) );
     /* COMDB2 modifications */
-    if(cAff == SQLITE_AFF_DATETIME) {
+    if( cAff == SQLITE_AFF_DATETIME ){
       /* pass the timezone before trying to convert */
       pIn1->tz = p->tzname;
       pIn1->dtprec = p->dtprec;
@@ -3811,7 +3819,7 @@ case OP_ReopenIdx: {
   VdbeCursor *pCur;
   Db *pDb;
 
-  assert( pOp->p5==0 || pOp->p5==OPFLAG_SEEKEQ);
+  assert( pOp->p5==0 || pOp->p5==OPFLAG_SEEKEQ );
   assert( pOp->p4type==P4_KEYINFO );
   pCur = p->apCsr[pOp->p1];
   if( pCur && pCur->pgnoRoot==(u32)pOp->p2 ){
@@ -3980,7 +3988,7 @@ case OP_OpenEphemeral: {
     if( (pKeyInfo = pOp->p4.pKeyInfo)!=0 ){
       int pgno;
       assert( pOp->p4type==P4_KEYINFO );
-      rc = sqlite3BtreeCreateTable(pCx->pBt, &pgno, BTREE_BLOBKEY | pOp->p5); 
+      rc = sqlite3BtreeCreateTable(pCx->pBt, &pgno, BTREE_BLOBKEY | pOp->p5);
       if( rc==SQLITE_OK ){
         //COMDB2 not valid: assert( pgno==MASTER_ROOT+1 );
         assert( pKeyInfo->db==db );
@@ -4957,11 +4965,10 @@ case OP_Delete: {
 
   /* COMDB2 MODIFICATION */
   /* In comdb2, we don't generate the index deletes, and we miss 
-  positioninig on the data cursor in the process 
-  (see sqlite3GenerateRowIndexDelete)
+  **  positioninig on the data cursor in the process
+  **(see sqlite3GenerateRowIndexDelete)
   */
-  if(pC->isTable && pC->deferredMoveto)
-  {
+  if( pC->isTable && pC->deferredMoveto ){
     rc = sqlite3VdbeCursorMoveto(&pC, &p2);
     if( rc ) goto abort_due_to_error;
   }
@@ -6776,7 +6783,7 @@ case OP_JournalMode: {    /* out2 */
   */
   if( eNew==PAGER_JOURNALMODE_WAL
    && (sqlite3Strlen30(zFilename)==0           /* Temp file */
-       || !sqlite3PagerWalSupported(pPager))   /* No shared-memory support */
+   || !sqlite3PagerWalSupported(pPager))   /* No shared-memory support */
   ){
     eNew = eOld;
   }
@@ -7414,11 +7421,12 @@ case OP_CursorHint: {
 **  COMDB2 CUSTOMIZATION 
 */  
 case OP_OpFuncLoad: {          /*  out2-prerelease */
-    OpFunc *f = pOp->p4.comdb2func;
-    pIn1 = &aMem[pOp->p2]; // TODO pOut
-    pIn1->u.pOpFunc = f;
-    pIn1->flags = MEM_OpFunc;
-    break;
+  OpFunc *f = pOp->p4.comdb2func;
+
+  pIn1 = &aMem[pOp->p2]; // TODO pOut
+  pIn1->u.pOpFunc = f;
+  pIn1->flags = MEM_OpFunc;
+  break;
 }
 
 /* OpCode: OpFuncExec P1 * * * * 
@@ -7430,19 +7438,19 @@ case OP_OpFuncLoad: {          /*  out2-prerelease */
 **  COMDB2 CUSTOMIZATION 
 */ 
 case OP_OpFuncExec: {          /* */
-    pIn1 = &aMem[pOp->p1];
-    OpFunc *f = pIn1->u.pOpFunc;
-    rc = f->func(f);
-    if (f->rc)
+  pIn1 = &aMem[pOp->p1];
+  OpFunc *f = pIn1->u.pOpFunc;
+  rc = f->func(f);
+  if (f->rc)
     {
       p->rc = rc = f->rc;
       sqlite3SetString(&p->zErrMsg, db, f->errorMsg);
     }
-    if (rc == SQLITE_COMDB2SCHEMA)
-      goto vdbe_return;
-    else if (rc)
-      goto abort_due_to_error;
-    break;
+  if (rc == SQLITE_COMDB2SCHEMA)
+    goto vdbe_return;
+  else if (rc)
+    goto abort_due_to_error;
+  break;
 }
 
 /* OpCode: OpFuncInteger P1 P2 * * * 
@@ -7454,12 +7462,12 @@ case OP_OpFuncExec: {          /* */
 ** COMDB2 CUSTOMIZATION
 */ 
 case OP_OpFuncInteger: {          /* out2-prerelease */
-    pIn1 = &aMem[pOp->p1];
-    OpFunc *f = pIn1->u.pOpFunc;
-    pOut = &aMem[pOp->p2];
-    pOut->flags = MEM_Int;
-    pOut->u.i = nextInteger(f);
-    break;
+  pIn1 = &aMem[pOp->p1];
+  OpFunc *f = pIn1->u.pOpFunc;
+  pOut = &aMem[pOp->p2];
+  pOut->flags = MEM_Int;
+  pOut->u.i = nextInteger(f);
+  break;
 }
 
 /* OpCode: OpFuncReal P1 P2 * * * 
@@ -7471,12 +7479,12 @@ case OP_OpFuncInteger: {          /* out2-prerelease */
 ** COMDB2 CUSTOMIZATION
 */ 
 case OP_OpFuncReal: {          /* out2-prerelease */
-    pIn1 = &aMem[pOp->p1];
-    OpFunc *f = pIn1->u.pOpFunc;
-    pOut = &aMem[pOp->p2];
-    pOut->flags = MEM_Real;
-    pOut->u.r = nextReal(f);
-    break;
+  pIn1 = &aMem[pOp->p1];
+  OpFunc *f = pIn1->u.pOpFunc;
+  pOut = &aMem[pOp->p2];
+  pOut->flags = MEM_Real;
+  pOut->u.r = nextReal(f);
+  break;
 }
 
 /* OpCode: OpFuncString P1 P2 * * * 
@@ -7488,13 +7496,13 @@ case OP_OpFuncReal: {          /* out2-prerelease */
 ** COMDB2 CUSTOMIZATION
 */
 case OP_OpFuncString: {          /* out2-prerelease */
-    pIn1 = &aMem[pOp->p1];
-    OpFunc *f = pIn1->u.pOpFunc;
-    pOut = &aMem[pOp->p2];
-    pOut->flags = MEM_Str|MEM_Static|MEM_Term;
-    nextString(f, pOut);
-    pOut->enc = encoding;
-    break;
+  pIn1 = &aMem[pOp->p1];
+  OpFunc *f = pIn1->u.pOpFunc;
+  pOut = &aMem[pOp->p2];
+  pOut->flags = MEM_Str|MEM_Static|MEM_Term;
+  nextString(f, pOut);
+  pOut->enc = encoding;
+  break;
 }
 
 /* Opcode:  NextOpFunc P1 P2 * * *
@@ -7582,20 +7590,19 @@ abort_due_to_error:
   if( rc==SQLITE_IOERR_NOMEM ) sqlite3OomFault(db);
   /* COMDB2 MODIFICATION */
   /* if it's one of our return codes, don't clobber it */
-  if
-    (
-      rc != SQLITE_DEADLOCK &&
-      rc != SQLITE_CONSTRAINT &&
-      rc != SQLITE_ACCESS && 
-      rc != SQLITE_TOOBIG &&
-      rc != SQLITE_LIMIT &&
-      rc != SQLITE_TRANTOOCOMPLEX &&
-      rc != SQLITE_TRAN_CANCELLED &&
-      rc != SQLITE_TRAN_NOLOG &&
-      rc != SQLITE_TRAN_NOUNDO &&
-      rc != SQLITE_SCHEMA_REMOTE
-    )
+  if( rc != SQLITE_DEADLOCK
+   && rc != SQLITE_CONSTRAINT
+   && rc != SQLITE_ACCESS
+   && rc != SQLITE_TOOBIG
+   && rc != SQLITE_LIMIT
+   && rc != SQLITE_TRANTOOCOMPLEX
+   && rc != SQLITE_TRAN_CANCELLED
+   && rc != SQLITE_TRAN_NOLOG
+   && rc != SQLITE_TRAN_NOUNDO
+   && rc != SQLITE_SCHEMA_REMOTE
+  ){
     rc = SQLITE_ERROR;
+  }
 
   if( resetSchemaOnFault>0 ){
     sqlite3ResetOneSchema(db, resetSchemaOnFault-1);
@@ -7640,4 +7647,3 @@ abort_due_to_interrupt:
   sqlite3VdbeError(p, "%s", sqlite3ErrStr(rc));
   goto abort_due_to_error;
 }
-/* vim: set ts=2 sw=2 et: */

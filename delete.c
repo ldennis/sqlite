@@ -439,7 +439,8 @@ void sqlite3DeleteFrom(
     if( eOnePass!=ONEPASS_OFF ){
       /* For ONEPASS, no need to store the rowid/primary-key. There is only
       ** one, so just keep it in its register(s) and fall through to the
-      ** delete code.  */
+      ** delete code.
+      */
       nKey = nPk; /* OP_Found will use an unpacked key */
       aToOpen = sqlite3DbMallocRawNN(db, nIdx+2);
       if( aToOpen==0 ){
@@ -727,7 +728,7 @@ void sqlite3GenerateRowDelete(
   */ 
   if( pTab->pSelect==0 ){
     u8 p5 = 0;
-    sqlite3GenerateRowIndexDelete(pParse, pTab, iDataCur, iIdxCur, 0,iIdxNoSeek);
+    sqlite3GenerateRowIndexDelete(pParse, pTab, iDataCur, iIdxCur,0,iIdxNoSeek);
     sqlite3VdbeAddOp2(v, OP_Delete, iDataCur, (count?OPFLAG_NCHANGE:0));
     sqlite3VdbeChangeP4(v, -1, (char*)pTab, P4_TABLE);
     if( eMode!=ONEPASS_OFF ){

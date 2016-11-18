@@ -38,8 +38,8 @@ typedef struct SubProgram SubProgram;
 #define DEFAULT_OPFUNC_BUFLEN 512
   typedef struct OpFunc OpFunc;
 
-  typedef  int (*vdbeFunc)(OpFunc* arg); // Used to refer to an external function;
-  typedef  int (*vdbeFuncArgFree) (OpFunc* arg); 
+  typedef  int (*vdbeFunc)(OpFunc* arg); /* To refer to an external function*/
+  typedef  int (*vdbeFuncArgFree)(OpFunc* arg);
 
   struct OpFunc {
     vdbeFunc func;
