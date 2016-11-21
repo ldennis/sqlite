@@ -107,7 +107,7 @@ int comdb2_dynamic_attach(sqlite3 *db, sqlite3_context *context, sqlite3_value *
   }
 
   for(i=0; i<db->nDb; i++){
-    char *z = db->aDb[i].zName;
+    char *z = db->aDb[i].zDbSName;
     assert( z && dbName);
     if( sqlite3StrICmp(z, dbName)==0 ){
     /*
@@ -178,7 +178,7 @@ int comdb2_dynamic_attach(sqlite3 *db, sqlite3_context *context, sqlite3_value *
 #endif
      }
      aNew->safety_level = SQLITE_DEFAULT_SYNCHRONOUS+1;
-     aNew->zName = dbName;
+     aNew->zDbSName = dbName;
 
 
 #ifdef SQLITE_HAS_CODEC
@@ -205,7 +205,7 @@ int comdb2_dynamic_attach(sqlite3 *db, sqlite3_context *context, sqlite3_value *
            case SQLITE_NULL:
               /* No key specified.  Use the key from the main database */
               sqlite3CodecGetKey(db, 0, (void**)&zKey, &nKey);
-              if( nKey>0 || sqlite3BtreeGetOptimalReserve(db->aDb[0].pBt)>0 ){
+              if( nKey || sqlite3BtreeGetOptimalReserve(db->aDb[0].pBt)>0 ){
                  rc = sqlite3CodecAttach(db, db->nDb-1, zKey, nKey);
               }
               break;
@@ -343,7 +343,7 @@ static void detachFunc(
   for(i=0; i<db->nDb; i++){
     pDb = &db->aDb[i];
     if( pDb->pBt==0 ) continue;
-    if( sqlite3StrICmp(pDb->zName, zName)==0 ) break;
+    if( sqlite3StrICmp(pDb->zDbSName, zName)==0 ) break;
   }
 
   if( i>=db->nDb ){
@@ -501,7 +501,7 @@ void sqlite3FixInit(
   db = pParse->db;
   assert( db->nDb>iDb );
   pFix->pParse = pParse;
-  pFix->zDb = db->aDb[iDb].zName;
+  pFix->zDb = db->aDb[iDb].zDbSName;
   pFix->pSchema = db->aDb[iDb].pSchema;
   pFix->zType = zType;
   pFix->pName = pName;
@@ -598,7 +598,7 @@ int sqlite3FixExpr(
         return 1;
       }
     }
-    if( ExprHasProperty(pExpr, EP_TokenOnly) ) break;
+    if( ExprHasProperty(pExpr, EP_TokenOnly|EP_Leaf) ) break;
     if( ExprHasProperty(pExpr, EP_xIsSelect) ){
       if( sqlite3FixSelect(pFix, pExpr->x.pSelect) ) return 1;
     }else{

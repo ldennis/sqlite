@@ -261,14 +261,14 @@ static int openStatTable(
   for(i=0; i<ArraySize(aTable); i++){
     const char *zTab = aTable[i].zName;
     Table *pStat;
-    if( (pStat = sqlite3FindTable(db, zTab, pDb->zName))==0 ){
+    if( (pStat = sqlite3FindTable(db, zTab, pDb->zDbSName))==0 ){
       if( aTable[i].zCols ){
         /* The sqlite_statN table does not exist. Create it. Note that a 
         ** side-effect of the CREATE TABLE statement is to leave the rootpage 
         ** of the new table in register pParse->regRoot. This is important 
         ** because the OpenWrite opcode below will be needing it. */
         sqlite3NestedParse(pParse,
-            "CREATE TABLE %Q.%s(%s)", pDb->zName, zTab, aTable[i].zCols
+            "CREATE TABLE %Q.%s(%s)", pDb->zDbSName, zTab, aTable[i].zCols
         );
         aRoot[i] = pParse->regRoot;
         aCreateTbl[i] = OPFLAG_P2ISREG;
@@ -283,7 +283,7 @@ static int openStatTable(
       if( zWhere ){
         sqlite3NestedParse(pParse,
            "DELETE FROM %Q.%s WHERE %s=%Q",
-           pDb->zName, zTab, zWhereType, zWhere
+           pDb->zDbSName, zTab, zWhereType, zWhere
         );
       }else{
         /* The sqlite_stat[134] table already exists.  Delete all rows. */
@@ -1036,7 +1036,7 @@ static void analyzeOneTable(
 #endif
 #ifndef SQLITE_OMIT_AUTHORIZATION
   if( sqlite3AuthCheck(pParse, SQLITE_ANALYZE, pTab->zName, 0,
-      db->aDb[iDb].zName ) ){
+      db->aDb[iDb].zDbSName ) ){
     return;
   }
 #endif
@@ -1557,7 +1557,7 @@ void sqlite3Analyze(Parse *pParse, Token *pName1, Token *pName2){
     /* Form 3: Analyze the fully qualified table name */
     iDb = sqlite3TwoPartName(pParse, pName1, pName2, &pTableName);
     if( iDb>=0 ){
-      zDb = db->aDb[iDb].zName;
+      zDb = db->aDb[iDb].zDbSName;
       z = sqlite3NameFromToken(db, pTableName);
       if( z ){
         if( (pIdx = sqlite3FindIndex(db, z, zDb))!=0 ){
@@ -1997,7 +1997,7 @@ int sqlite3AnalysisLoad(sqlite3 *db, int iDb){
 
   /* Load new statistics out of the sqlite_stat1 table */
   sInfo.db = db;
-  sInfo.zDatabase = db->aDb[iDb].zName;
+  sInfo.zDatabase = db->aDb[iDb].zDbSName;
   if( sqlite3FindTableByAnalysisLoad(db, "sqlite_stat1", sInfo.zDatabase)!=0 ){
     zSql = sqlite3MPrintf(db, 
         "SELECT tbl,idx,stat FROM %Q.sqlite_stat1 WHERE tbl not like 'cdb2.%%.sav'", sInfo.zDatabase);
