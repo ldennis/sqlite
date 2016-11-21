@@ -237,7 +237,7 @@ static int tclvarColumn(sqlite3_vtab_cursor *cur, sqlite3_context *ctx, int i){
   if( p2 ){
     z2 = Tcl_GetString(p2);
   }
-  switch (i) {
+  switch(i ){
     case 0: {
       sqlite3_result_text(ctx, z1, -1, SQLITE_TRANSIENT);
       break;

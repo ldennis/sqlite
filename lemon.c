@@ -3345,7 +3345,7 @@ PRIVATE FILE *tplt_open(struct lemon *lemp)
   char *cp;
 
   /* first, see if user specified a template filename on the command line. */
-  if (user_templatename != 0) {
+  if( user_templatename != 0 ){
     if( access(user_templatename,004)==-1 ){
       fprintf(stderr,"Can't find the parser driver template file \"%s\".\n",
         user_templatename);
@@ -3415,7 +3415,7 @@ PRIVATE void tplt_print(FILE *out, struct lemon *lemp, char *str, int *lineno)
     putc('\n',out);
     (*lineno)++;
   }
-  if (!lemp->nolinenosflag) {
+  if( !lemp->nolinenosflag ){
     (*lineno)++; tplt_linedir(out,*lineno,lemp->outname); 
   }
   return;
@@ -3461,7 +3461,7 @@ void emit_destructor_code(
    fputc(*cp,out);
  }
  fprintf(out,"\n"); (*lineno)++;
- if (!lemp->nolinenosflag) { 
+ if( !lemp->nolinenosflag ){
    (*lineno)++; tplt_linedir(out,*lineno,lemp->outname); 
  }
  fprintf(out,"}\n"); (*lineno)++;

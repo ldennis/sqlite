@@ -5584,8 +5584,9 @@ int sqlite3Select(
         sqlite3CodeVerifySchema(pParse, iDb);
 
         /* COMDB2 MODIFICATION */
-        if (iDb != 1)
-            sqlite3VdbeAddTable(v, pTab);
+        if( iDb != 1 ){
+          sqlite3VdbeAddTable(v, pTab);
+        }
 
         sqlite3TableLock(pParse, iDb, pTab->tnum, 0, pTab->zName);
 

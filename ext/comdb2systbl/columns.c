@@ -63,7 +63,7 @@ static int systblColumnsConnect(
 #define STCOL_ALLOWNULL 8
 
   rc = sqlite3_declare_vtab(db,
-     "CREATE TABLE comdb2sys_tables(tablename,"
+     "CREATE TABLE comdb2sys_columns(tablename,"
                                    "columnname,"
                                    "type,"
                                    "size,"
@@ -88,6 +88,20 @@ static int systblColumnsDisconnect(sqlite3_vtab *pVtab){
   return SQLITE_OK;
 }
 
+static int checkRowidAccess(systbl_columns_cursor *pCur) {
+  while (pCur->iRowid < thedb->num_dbs) {
+    struct db *pDb = thedb->dbs[pCur->iRowid];
+    char *x = pDb->dbname;
+    int bdberr;
+    struct sql_thread *thd = pthread_getspecific(query_info_key);
+    int rc = bdb_check_user_tbl_access(thedb->bdb_env, thd->sqlclntstate->user, x, ACCESS_READ, &bdberr);
+    if (rc == 0)
+       return SQLITE_OK;
+    pCur->iRowid++;
+  }
+  return SQLITE_OK;
+}
+
 /*
 ** Constructor for systbl_columns_cursor objects.
 */
@@ -98,6 +112,7 @@ static int systblColumnsOpen(sqlite3_vtab *p, sqlite3_vtab_cursor **ppCursor){
   if( pCur==0 ) return SQLITE_NOMEM;
   memset(pCur, 0, sizeof(*pCur));
   *ppCursor = &pCur->base;
+  checkRowidAccess(pCur);
   return SQLITE_OK;
 }
 
@@ -118,6 +133,7 @@ static int systblColumnsNext(sqlite3_vtab_cursor *cur){
   if( ++pCur->iColid == thedb->dbs[pCur->iRowid]->schema->nmembers ){
     pCur->iColid = 0;
     pCur->iRowid++;
+    checkRowidAccess(pCur);
   }
   return SQLITE_OK;
 }

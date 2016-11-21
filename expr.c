@@ -838,7 +838,7 @@ Expr *sqlite3PExpr(
     p = sqlite3ExprAlloc(pParse->db, op & TKFLG_MASK, pToken, 1);
     sqlite3ExprAttachSubtrees(pParse->db, p, pLeft, pRight);
   }
-  if( p ) {
+  if( p ){
     sqlite3ExprCheckHeight(pParse, p->nHeight);
   }
   return p;
@@ -1937,15 +1937,15 @@ int sqlite3IsRowid(const char *z){
 }
 
 /* COMDB2 MODIFICATION */
-int sqlite3IsComdb2Rowid(const char *z) {
+int sqlite3IsComdb2Rowid(const char *z){
   return (sqlite3StrICmp(z, "COMDB2_ROWID") == 0);
 }
 
 
 /* COMDB2 MODIFICATION */
-int sqlite3IsComdb2RowTimestamp(const char *z) {
+int sqlite3IsComdb2RowTimestamp(const char *z){
   extern int comdb2genidcontainstime(void);
-  if (comdb2genidcontainstime()) {
+  if (comdb2genidcontainstime()){
       return 
           (sqlite3StrICmp(z, "COMDB2_ROW_TIMESTAMP") == 0 ||
            sqlite3StrICmp(z, "COMDB2_ROWTIMESTAMP") == 0);
@@ -5062,663 +5062,667 @@ void sqlite3ClearTempRegCache(Parse *pParse){
 
 /* COMDB2 MODIFICATION */
 extern char* fdb_table_name(int iTable);
-static char *print_mem(Mem *m)
-{
-   int flg = m->flags & MEM_TypeMask;
-   char *hex = "0123456789ABCDEF";
+static char *print_mem(Mem *m){
+  int flg = m->flags & MEM_TypeMask;
+  char *hex = "0123456789ABCDEF";
 
-   switch (flg) {
-      case MEM_Null:
-         return sqlite3_mprintf("null");
-      case MEM_Str: 
-         return sqlite3_mprintf("'%.*s'", m->n, m->z);
-      case MEM_Int:
-         return  sqlite3_mprintf("%lld", m->u.i);
-      case MEM_Real:
-         return sqlite3_mprintf("%f", m->u.r);
-      case MEM_Blob:
-      {
-         char * key = alloca(2*m->n+1);
-         int  i;
+  switch (flg){
+    case MEM_Null:
+      return sqlite3_mprintf("null");
+    case MEM_Str: 
+      return sqlite3_mprintf("'%.*s'", m->n, m->z);
+    case MEM_Int:
+      return  sqlite3_mprintf("%lld", m->u.i);
+    case MEM_Real:
+      return sqlite3_mprintf("%f", m->u.r);
+    case MEM_Blob: {
+      char * key = alloca(2*m->n+1);
+      int  i;
 
-         for(i=0;i<m->n;i++)
-         {
-            key[2*i] = hex[((unsigned char)m->z[i])/16];
-            key[2*i+1] = hex[((unsigned char)m->z[i])%16];
-         }
-         key[2*m->n] = '\0';
-
-         return sqlite3_mprintf("x'%s'", key);
+      for(i=0;i<m->n;i++){
+	key[2*i] = hex[((unsigned char)m->z[i])/16];
+	key[2*i+1] = hex[((unsigned char)m->z[i])%16];
       }
-      case MEM_Datetime:
-      {
-         char tmp[256];
-         int ltmp;
-         if (dttz_to_str(&m->du.dt, tmp, sizeof(tmp), &ltmp, "UTC"))
-            return sqlite3_mprintf("???");
+      key[2*m->n] = '\0';
 
-         return sqlite3_mprintf("\"%s\"", tmp);
+      return sqlite3_mprintf("x'%s'", key);
+    }
+    case MEM_Datetime: {
+      char tmp[256];
+      int ltmp;
+      if( dttz_to_str(&m->du.dt, tmp, sizeof(tmp), &ltmp, "UTC") ){
+	return sqlite3_mprintf("???");
       }
-   }
-   /** TODO: should I return NULL here? */
-   return sqlite3_mprintf("???");
+
+      return sqlite3_mprintf("\"%s\"", tmp);
+    }
+  }
+  /** TODO: should I return NULL here? */
+  return sqlite3_mprintf("???");
 }
 
-char * binary_op( int op)
-{
-   switch(op)
-   {
-      case TK_SEMI : break; 
-      case TK_EXPLAIN : break; 
-      case TK_QUERY : break; 
-      case TK_PLAN : break; 
-      case TK_BEGIN : break; 
-      case TK_TRANSACTION : break; 
-      case TK_DEFERRED : break; 
-      case TK_IMMEDIATE : break; 
-      case TK_EXCLUSIVE : break; 
-      case TK_COMMIT : break; 
-      case TK_END : break; 
-      case TK_ROLLBACK : break; 
-      case TK_SAVEPOINT : break; 
-      case TK_RELEASE : break; 
-      case TK_TO : break; 
-      case TK_TABLE : break; 
-      case TK_CREATE : break; 
-      case TK_IF : break; 
-      case TK_NOT : break; 
-      case TK_EXISTS : break; 
-      case TK_TEMP : break; 
-      case TK_LP : break; 
-      case TK_RP : break; 
-      case TK_AS : break; 
-      case TK_COMMA : break; 
-      case TK_ID : break; 
-      case TK_INDEXED : break; 
-      case TK_ABORT : break; 
-      case TK_ACTION : break; 
-      case TK_AFTER : break; 
-      case TK_ANALYZE : break; 
-      case TK_ASC : break; 
-      case TK_ATTACH : break; 
-      case TK_BEFORE : break; 
-      case TK_BY : break; 
-      case TK_CASCADE : break; 
-      case TK_CAST : break; 
-      case TK_COLUMNKW : break; 
-      case TK_CONFLICT : break; 
-      case TK_DATABASE : break; 
-      case TK_DESC : break; 
-      case TK_DETACH : break; 
-      case TK_EACH : break; 
-      case TK_FAIL : break; 
-      case TK_FOR : break; 
-      case TK_IGNORE : break; 
-      case TK_INITIALLY : break; 
-      case TK_INSTEAD : break; 
-      case TK_LIKE_KW : break; 
-      case TK_MATCH : break; 
-      case TK_NO : break; 
-      case TK_KEY : break; 
-      case TK_OF : break; 
-      case TK_OFFSET : break; 
-      case TK_PRAGMA : break; 
-      case TK_RAISE : break; 
-      case TK_REPLACE : break; 
-      case TK_RESTRICT : break; 
-      case TK_ROW : break; 
-      case TK_TRIGGER : break; 
-      case TK_VACUUM : break; 
-      case TK_VIEW : break; 
-      case TK_VIRTUAL : break; 
-      case TK_REINDEX : break; 
-      case TK_RENAME : break; 
-      case TK_CTIME_KW : break; 
-      case TK_ANY : break; 
-      case TK_OR : 
-         return "OR";
-      case TK_AND : 
-         return "AND";
-      case TK_IS :
-         return "IS";
-      case TK_BETWEEN : break; 
-      case TK_IN : break; 
-      case TK_ISNULL : break;
-      case TK_NOTNULL : break;
-      case TK_NE :
-         return "!=";
-      case TK_EQ:
-         return "=";
-      case TK_GT : 
-         return ">";
-      case TK_LE :
-         return "<=";
-      case TK_LT :
-         return "<";
-      case TK_GE :
-         return ">=";
-      case TK_ESCAPE : break; 
-      case TK_BITAND :
-         return "&";
-      case TK_BITOR :
-         return "|";
-      case TK_LSHIFT : break; 
-      case TK_RSHIFT : break; 
-      case TK_PLUS : 
-         return "+";
-      case TK_MINUS :
-         return "-";
-      case TK_STAR :
-         return "*";
-      case TK_SLASH :
-         return "/";
-      case TK_REM : 
-         return "%";
-      case TK_CONCAT : break; 
-      case TK_COLLATE : break; 
-      case TK_BITNOT : break; 
-      case TK_STRING : break; 
-      case TK_JOIN_KW : break; 
-      case TK_CONSTRAINT : break; 
-      case TK_DEFAULT : break; 
-      case TK_NULL : break; 
-      case TK_PRIMARY : break; 
-      case TK_UNIQUE : break; 
-      case TK_CHECK : break; 
-      case TK_REFERENCES : break; 
-      case TK_AUTOINCR : break; 
-      case TK_ON : break; 
-      case TK_INSERT : break; 
-      case TK_DELETE : break; 
-      case TK_UPDATE : break; 
-      case TK_SET : break; 
-      case TK_DEFERRABLE : break; 
-      case TK_FOREIGN : break; 
-      case TK_DROP : break; 
-      case TK_UNION : break; 
-      case TK_ALL : break; 
-      case TK_EXCEPT : break; 
-      case TK_INTERSECT : break; 
-      case TK_SELECT : break; 
-      case TK_SELECTV : break; 
-      case TK_DISTINCT : break; 
-      case TK_DOT : break; 
-      case TK_FROM : break; 
-      case TK_JOIN : break; 
-      case TK_USING : break; 
-      case TK_ORDER : break; 
-      case TK_GROUP : break; 
-      case TK_HAVING : break; 
-      case TK_LIMIT : break; 
-      case TK_WHERE : break; 
-      case TK_INTO : break; 
-      case TK_VALUES : break; 
-      case TK_INTEGER: break;
-      case TK_FLOAT : break; 
-      case TK_BLOB : break; 
-      case TK_REGISTER: break;
-      case TK_VARIABLE : break; 
-      case TK_CASE : break; 
-      case TK_WHEN : break; 
-      case TK_THEN : break; 
-      case TK_ELSE : break; 
-      case TK_INDEX : break; 
-      case TK_TO_TEXT : break; 
-      case TK_TO_DATETIME : break; 
-      case TK_TO_INTERVAL_YE : break; 
-      case TK_TO_INTERVAL_MO : break; 
-      case TK_TO_INTERVAL_DY : break; 
-      case TK_TO_INTERVAL_HO : break; 
-      case TK_TO_INTERVAL_MI : break; 
-      case TK_TO_INTERVAL_SE : break; 
-      case TK_TO_BLOB : break; 
-      case TK_TO_NUMERIC : break; 
-      case TK_TO_INT : break; 
-      case TK_TO_REAL : break; 
-      case TK_TO_DECIMAL : break; 
-      case TK_ISNOT : break; 
-      case TK_END_OF_FILE : break; 
-      case TK_ILLEGAL : break; 
-      case TK_SPACE : break; 
-      case TK_UNCLOSED_STRING : break; 
-      case TK_FUNCTION : break; 
-      case TK_COLUMN : break;
-      case TK_AGG_FUNCTION : break; 
-      case TK_AGG_COLUMN : break; 
-      case TK_UMINUS : break; 
-      case TK_UPLUS : break; 
-   }
+char * binary_op(int op){
+  switch( op ){
+    case TK_SEMI:
+    case TK_EXPLAIN:
+    case TK_QUERY:
+    case TK_PLAN:
+    case TK_BEGIN:
+    case TK_TRANSACTION:
+    case TK_DEFERRED:
+    case TK_IMMEDIATE:
+    case TK_EXCLUSIVE:
+    case TK_COMMIT:
+    case TK_END:
+    case TK_ROLLBACK:
+    case TK_SAVEPOINT:
+    case TK_RELEASE:
+    case TK_TO:
+    case TK_TABLE:
+    case TK_CREATE:
+    case TK_IF:
+    case TK_NOT:
+    case TK_EXISTS:
+    case TK_TEMP:
+    case TK_LP:
+    case TK_RP:
+    case TK_AS:
+    case TK_COMMA:
+    case TK_ID:
+    case TK_INDEXED:
+    case TK_ABORT:
+    case TK_ACTION:
+    case TK_AFTER:
+    case TK_ANALYZE:
+    case TK_ASC:
+    case TK_ATTACH:
+    case TK_BEFORE:
+    case TK_BY:
+    case TK_CASCADE:
+    case TK_CAST:
+    case TK_COLUMNKW:
+    case TK_CONFLICT:
+    case TK_DATABASE:
+    case TK_DESC:
+    case TK_DETACH:
+    case TK_EACH:
+    case TK_FAIL:
+    case TK_FOR:
+    case TK_IGNORE:
+    case TK_INITIALLY:
+    case TK_INSTEAD:
+    case TK_LIKE_KW:
+    case TK_MATCH:
+    case TK_NO:
+    case TK_KEY:
+    case TK_OF:
+    case TK_OFFSET:
+    case TK_PRAGMA:
+    case TK_RAISE:
+    case TK_REPLACE:
+    case TK_RESTRICT:
+    case TK_ROW:
+    case TK_TRIGGER:
+    case TK_VACUUM:
+    case TK_VIEW:
+    case TK_VIRTUAL:
+    case TK_REINDEX:
+    case TK_RENAME:
+    case TK_CTIME_KW:
+    case TK_ANY: {
+      break;
+    }
+    case TK_OR :
+      return "OR";
+    case TK_AND :
+      return "AND";
+    case TK_IS :
+      return "IS";
+    case TK_BETWEEN:
+    case TK_IN:
+    case TK_ISNULL:
+    case TK_NOTNULL: {
+      break;
+    }
+    case TK_NE :
+      return "!=";
+    case TK_EQ:
+      return "=";
+    case TK_GT :
+      return ">";
+    case TK_LE :
+      return "<=";
+    case TK_LT :
+      return "<";
+    case TK_GE :
+      return ">=";
+    case TK_ESCAPE: break;
+    case TK_BITAND :
+      return "&";
+    case TK_BITOR :
+      return "|";
+    case TK_LSHIFT:
+    case TK_RSHIFT: {
+      break;
+    }
+    case TK_PLUS :
+      return "+";
+    case TK_MINUS :
+      return "-";
+    case TK_STAR :
+      return "*";
+    case TK_SLASH :
+      return "/";
+    case TK_REM :
+      return "%";
+    case TK_CONCAT:
+    case TK_COLLATE:
+    case TK_BITNOT:
+    case TK_STRING:
+    case TK_JOIN_KW:
+    case TK_CONSTRAINT:
+    case TK_DEFAULT:
+    case TK_NULL:
+    case TK_PRIMARY:
+    case TK_UNIQUE:
+    case TK_CHECK:
+    case TK_REFERENCES:
+    case TK_AUTOINCR:
+    case TK_ON:
+    case TK_INSERT:
+    case TK_DELETE:
+    case TK_UPDATE:
+    case TK_SET:
+    case TK_DEFERRABLE:
+    case TK_FOREIGN:
+    case TK_DROP:
+    case TK_UNION:
+    case TK_ALL:
+    case TK_EXCEPT:
+    case TK_INTERSECT:
+    case TK_SELECT:
+    case TK_SELECTV:
+    case TK_DISTINCT:
+    case TK_DOT:
+    case TK_FROM:
+    case TK_JOIN:
+    case TK_USING:
+    case TK_ORDER:
+    case TK_GROUP:
+    case TK_HAVING:
+    case TK_LIMIT:
+    case TK_WHERE:
+    case TK_INTO:
+    case TK_VALUES:
+    case TK_INTEGER:
+    case TK_FLOAT:
+    case TK_BLOB:
+    case TK_REGISTER:
+    case TK_VARIABLE:
+    case TK_CASE:
+    case TK_WHEN:
+    case TK_THEN:
+    case TK_ELSE:
+    case TK_INDEX:
+    case TK_TO_TEXT:
+    case TK_TO_DATETIME:
+    case TK_TO_INTERVAL_YE:
+    case TK_TO_INTERVAL_MO:
+    case TK_TO_INTERVAL_DY:
+    case TK_TO_INTERVAL_HO:
+    case TK_TO_INTERVAL_MI:
+    case TK_TO_INTERVAL_SE:
+    case TK_TO_BLOB:
+    case TK_TO_NUMERIC:
+    case TK_TO_INT:
+    case TK_TO_REAL:
+    case TK_TO_DECIMAL:
+    case TK_ISNOT:
+    case TK_END_OF_FILE:
+    case TK_ILLEGAL:
+    case TK_SPACE:
+    case TK_UNCLOSED_STRING:
+    case TK_FUNCTION:
+    case TK_COLUMN:
+    case TK_AGG_FUNCTION:
+    case TK_AGG_COLUMN:
+    case TK_UMINUS:
+    case TK_UPLUS: {
+      break;
+    }
+  }
 
-   return "???????";
+  return "???????";
 }
 
 /* COMDB2 MODIFICATION */
 extern const char* comdb2_get_sql(void);
 
-static char* sqlite3ExprDescribe_inner(Vdbe *v, const Expr *pExpr, int atRuntime)
-{
-   switch(pExpr->op)
-   {
-      case TK_SEMI : break; 
-      case TK_EXPLAIN : break; 
-      case TK_QUERY : break; 
-      case TK_PLAN : break; 
-      case TK_BEGIN : break; 
-      case TK_TRANSACTION : break; 
-      case TK_DEFERRED : break; 
-      case TK_IMMEDIATE : break; 
-      case TK_EXCLUSIVE : break; 
-      case TK_COMMIT : break; 
-      case TK_END : break; 
-      case TK_ROLLBACK : break; 
-      case TK_SAVEPOINT : break; 
-      case TK_RELEASE : break; 
-      case TK_TO : break; 
-      case TK_TABLE : break; 
-      case TK_CREATE : break; 
-      case TK_IF : break; 
-      case TK_NOT :
-      {
-         char *expr = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
-         if (!expr)
-            return NULL;
-
-         char *ret = sqlite3_mprintf("NOT %s", expr);
-
-         sqlite3DbFree(v->db, expr);
-
-         return ret;
+static char* sqlite3ExprDescribe_inner(
+  Vdbe *v,
+  const Expr *pExpr,
+  int atRuntime
+){
+  switch( pExpr->op ){
+    case TK_SEMI:
+    case TK_EXPLAIN:
+    case TK_QUERY:
+    case TK_PLAN:
+    case TK_BEGIN:
+    case TK_TRANSACTION:
+    case TK_DEFERRED:
+    case TK_IMMEDIATE:
+    case TK_EXCLUSIVE:
+    case TK_COMMIT:
+    case TK_END:
+    case TK_ROLLBACK:
+    case TK_SAVEPOINT:
+    case TK_RELEASE:
+    case TK_TO:
+    case TK_TABLE:
+    case TK_CREATE:
+    case TK_IF: {
+      break;
+    }
+    case TK_NOT: {
+      char *expr = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
+      if ( !expr ){
+        return NULL;
       }
-      case TK_EXISTS : break; 
-      case TK_TEMP : break; 
-      case TK_LP : break; 
-      case TK_RP : break; 
-      case TK_AS : break; 
-      case TK_COMMA : break; 
-      case TK_ID : break; 
-      case TK_INDEXED : break; 
-      case TK_ABORT : break; 
-      case TK_ACTION : break; 
-      case TK_AFTER : break; 
-      case TK_ANALYZE : break; 
-      case TK_ASC : break; 
-      case TK_ATTACH : break; 
-      case TK_BEFORE : break; 
-      case TK_BY : break; 
-      case TK_CASCADE : break; 
-      case TK_CAST : break; 
-      case TK_COLUMNKW : break; 
-      case TK_CONFLICT : break; 
-      case TK_DATABASE : break; 
-      case TK_DESC : break; 
-      case TK_DETACH : break; 
-      case TK_EACH : break; 
-      case TK_FAIL : break; 
-      case TK_FOR : break; 
-      case TK_IGNORE : break; 
-      case TK_INITIALLY : break; 
-      case TK_INSTEAD : break; 
-      case TK_LIKE_KW : break; 
-      case TK_MATCH : break; 
-      case TK_NO : break; 
-      case TK_KEY : break; 
-      case TK_OF : break; 
-      case TK_OFFSET : break; 
-      case TK_PRAGMA : break; 
-      case TK_RAISE : break; 
-      case TK_REPLACE : break; 
-      case TK_RESTRICT : break; 
-      case TK_ROW : break; 
-      case TK_TRIGGER : break; 
-      case TK_VACUUM : break; 
-      case TK_VIEW : break; 
-      case TK_VIRTUAL : break; 
-      case TK_REINDEX : break; 
-      case TK_RENAME : break; 
-      case TK_CTIME_KW : break; 
-      case TK_ANY : break; 
-      case TK_OR : break; 
-      case TK_AND :
-      case TK_IS :
-      {
-         char *left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
-         if (!left)
-            return NULL;
-         char *right = sqlite3ExprDescribe_inner(v, pExpr->pRight, atRuntime);
-         if (!right)
-         {
-            sqlite3DbFree(v->db, left);
-            return NULL;
-         }
 
-         char *ret = sqlite3_mprintf("( %s %s %s )", left, binary_op(pExpr->op), right);
-        
-         sqlite3DbFree(v->db, left);
-         sqlite3DbFree(v->db, right);
+      char *ret = sqlite3_mprintf("NOT %s", expr);
 
-         return ret;
+      sqlite3DbFree(v->db, expr);
+
+      return ret;
+    }
+    case TK_EXISTS:
+    case TK_TEMP:
+    case TK_LP:
+    case TK_RP:
+    case TK_AS:
+    case TK_COMMA:
+    case TK_ID:
+    case TK_INDEXED:
+    case TK_ABORT:
+    case TK_ACTION:
+    case TK_AFTER:
+    case TK_ANALYZE:
+    case TK_ASC:
+    case TK_ATTACH:
+    case TK_BEFORE:
+    case TK_BY:
+    case TK_CASCADE:
+    case TK_CAST:
+    case TK_COLUMNKW:
+    case TK_CONFLICT:
+    case TK_DATABASE:
+    case TK_DESC:
+    case TK_DETACH:
+    case TK_EACH:
+    case TK_FAIL:
+    case TK_FOR:
+    case TK_IGNORE:
+    case TK_INITIALLY:
+    case TK_INSTEAD:
+    case TK_LIKE_KW:
+    case TK_MATCH:
+    case TK_NO:
+    case TK_KEY:
+    case TK_OF:
+    case TK_OFFSET:
+    case TK_PRAGMA:
+    case TK_RAISE:
+    case TK_REPLACE:
+    case TK_RESTRICT:
+    case TK_ROW:
+    case TK_TRIGGER:
+    case TK_VACUUM:
+    case TK_VIEW:
+    case TK_VIRTUAL:
+    case TK_REINDEX:
+    case TK_RENAME:
+    case TK_CTIME_KW:
+    case TK_ANY:
+    case TK_OR: {
+      break;
+    }
+    case TK_AND:
+    case TK_IS: {
+      char *left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
+      if( !left ){
+        return NULL;
       }
-      case TK_BETWEEN : break; 
-      case TK_IN :
-      {
-         int  i;
-         char *left, *ret2, *ret = NULL;
-
-         if (pExpr->x.pList->nExpr == 0)
-         {
-            break;
-         }
-
-         left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
-         if (!left)
-         {
-            return NULL;
-         }
-         ret = sqlite3_mprintf(" %s IN ", left);
-
-         sqlite3DbFree(v->db, left);
-
-         for(i =0; i< pExpr->x.pList->nExpr; i++)
-         {
-            left = sqlite3ExprDescribe_inner(v, pExpr->x.pList->a[i].pExpr, atRuntime);
-            if (!left)
-            {
-               sqlite3DbFree(v->db, ret);
-               return NULL;
-            }
-            ret2 = sqlite3_mprintf("%s%s%s%s", ret, (i)?", ":"( ", left, (i==pExpr->x.pList->nExpr-1)?" )":"");
-            sqlite3DbFree(v->db, ret);
-            sqlite3DbFree(v->db, left);
-            ret = ret2;
-         }
-
-         return ret;
+      char *right = sqlite3ExprDescribe_inner(v, pExpr->pRight, atRuntime);
+      if( !right ){
+        sqlite3DbFree(v->db, left);
+        return NULL;
       }
-      case TK_ISNULL :
-      {
-         char *left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
-         if (!left)
-            return NULL;
-         char *ret = sqlite3_mprintf("( %s IS NULL )", left);
 
-         sqlite3DbFree(v->db, left);
+      char *ret = sqlite3_mprintf("( %s %s %s )",
+                        left, binary_op(pExpr->op), right);
+      sqlite3DbFree(v->db, left);
+      sqlite3DbFree(v->db, right);
 
-         return ret;
+      return ret;
+    }
+    case TK_BETWEEN: break;
+    case TK_IN: {
+      int  i;
+      char *left, *ret2, *ret = NULL;
+
+      if( pExpr->x.pList->nExpr == 0 ){
+        break;
       }
-      case TK_NOTNULL : 
-      {
-         char *left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
-         if (!left)
-            return NULL;
-         char *ret = sqlite3_mprintf("( %s NOT NULL )", left);
 
-         sqlite3DbFree(v->db, left);
-
-         return ret;
+      left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
+      if( !left ){
+        return NULL;
       }
-      case TK_NE :
-      case TK_EQ:
-      case TK_GT : 
-      case TK_LE :
-      case TK_LT :
-      case TK_GE :
-      {
-         char *left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
-         if (!left)
-            return NULL;
-         char *right = sqlite3ExprDescribe_inner(v, pExpr->pRight, atRuntime);
-         if (!right)
-         {
-            sqlite3DbFree(v->db, left);
-            return NULL;
-         }
-         char *ret = sqlite3_mprintf("( %s %s %s )", left, binary_op(pExpr->op), right);
-        
-         sqlite3DbFree(v->db, left);
-         sqlite3DbFree(v->db, right);
+      ret = sqlite3_mprintf(" %s IN ", left);
 
-         return ret;
+      sqlite3DbFree(v->db, left);
+
+      for(i =0; i< pExpr->x.pList->nExpr; i++){
+        left = sqlite3ExprDescribe_inner(v, pExpr->x.pList->a[i].pExpr,
+                     atRuntime);
+        if( !left ){
+          sqlite3DbFree(v->db, ret);
+          return NULL;
+        }
+        ret2 = sqlite3_mprintf("%s%s%s%s", ret, (i)?", ":"( ", left,
+         (i==pExpr->x.pList->nExpr-1)?" )":"");
+        sqlite3DbFree(v->db, ret);
+        sqlite3DbFree(v->db, left);
+        ret = ret2;
       }
-      case TK_ESCAPE : break; 
-      case TK_BITAND : 
-      case TK_BITOR : 
-      {
-         char *left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
-         if (!left)
-            return NULL;
-         char *right = sqlite3ExprDescribe_inner(v, pExpr->pRight, atRuntime);
-         if (!right)
-         {
-            sqlite3DbFree(v->db, left);
-            return NULL;
-         }
 
-         char *ret = sqlite3_mprintf("( %s %s %s )", left, binary_op(pExpr->op), right);
-
-         sqlite3DbFree(v->db, left);
-         sqlite3DbFree(v->db, right);
-
-         return ret;
+      return ret;
+    }
+    case TK_ISNULL: {
+      char *left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
+      if( !left ){
+        return NULL;
       }
-      case TK_LSHIFT : break; 
-      case TK_RSHIFT : break; 
-      case TK_PLUS : 
-      case TK_MINUS :
-      case TK_STAR : 
-      case TK_SLASH :
-      case TK_REM :
-      {
-         char *left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
-         if (!left)
-            return NULL;
-         char *right = sqlite3ExprDescribe_inner(v, pExpr->pRight, atRuntime);
-         if (!right)
-         {
-            sqlite3DbFree(v->db, left);
-            return NULL;
-         }
-         char *ret = sqlite3_mprintf("( %s %s %s )", left, binary_op(pExpr->op), right);
+      char *ret = sqlite3_mprintf("( %s IS NULL )", left);
 
-         sqlite3DbFree(v->db, left);
-         sqlite3DbFree(v->db, right);
+      sqlite3DbFree(v->db, left);
 
-         return ret;
+      return ret;
+    }
+    case TK_NOTNULL: {
+      char *left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
+      if( !left ){
+        return NULL;
       }
-      case TK_CONCAT : break; 
-      case TK_COLLATE : break; 
-      case TK_BITNOT : 
-      {
-         char *left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
-         if (!left)
-            return NULL;
-         char *ret = sqlite3_mprintf("( ~ %s )", left);
-         
-         sqlite3DbFree(v->db, left);
+      char *ret = sqlite3_mprintf("( %s NOT NULL )", left);
 
-         return ret;
+      sqlite3DbFree(v->db, left);
+
+      return ret;
+    }
+    case TK_NE :
+    case TK_EQ:
+    case TK_GT :
+    case TK_LE :
+    case TK_LT :
+    case TK_GE: {
+      char *left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
+      if( !left ){
+        return NULL;
       }
-      case TK_STRING :
-      {
-         return sqlite3_mprintf("'%s'", pExpr->u.zToken);
+      char *right = sqlite3ExprDescribe_inner(v, pExpr->pRight, atRuntime);
+      if( !right ){
+        sqlite3DbFree(v->db, left);
+        return NULL;
       }
-      case TK_JOIN_KW : break; 
-      case TK_CONSTRAINT : break; 
-      case TK_DEFAULT : break; 
-      case TK_NULL : 
-      {
-         return sqlite3_mprintf("NULL");
+      char *ret = sqlite3_mprintf("( %s %s %s )", left,
+       binary_op(pExpr->op), right);
+
+      sqlite3DbFree(v->db, left);
+      sqlite3DbFree(v->db, right);
+
+      return ret;
+    }
+    case TK_ESCAPE:{
+      break;
+    }
+    case TK_BITAND:
+    case TK_BITOR: {
+      char *left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
+      if( !left ){
+        return NULL;
       }
-      case TK_PRIMARY : break; 
-      case TK_UNIQUE : break; 
-      case TK_CHECK : break; 
-      case TK_REFERENCES : break; 
-      case TK_AUTOINCR : break; 
-      case TK_ON : break; 
-      case TK_INSERT : break; 
-      case TK_DELETE : break; 
-      case TK_UPDATE : break; 
-      case TK_SET : break; 
-      case TK_DEFERRABLE : break; 
-      case TK_FOREIGN : break; 
-      case TK_DROP : break; 
-      case TK_UNION : break; 
-      case TK_ALL : break; 
-      case TK_EXCEPT : break; 
-      case TK_INTERSECT : break; 
-      case TK_SELECT : break; 
-      case TK_SELECTV : break; 
-      case TK_DISTINCT : break; 
-      case TK_DOT : break; 
-      case TK_FROM : break; 
-      case TK_JOIN : break; 
-      case TK_USING : break; 
-      case TK_ORDER : break; 
-      case TK_GROUP : 
-      {
-      #if 0
-         char *expr = sqlite3ExprDescribe(v, pExpr->x.pEList);
-
-         return sqlite3_mprintf(" GROUP BY %s", expr);
-         #endif
-
-         break;
+      char *right = sqlite3ExprDescribe_inner(v, pExpr->pRight, atRuntime);
+      if( !right ){
+        sqlite3DbFree(v->db, left);
+        return NULL;
       }
-      case TK_HAVING : break; 
-      case TK_LIMIT : break; 
-      case TK_WHERE : break; 
-      case TK_INTO : break; 
-      case TK_VALUES : break; 
-      case TK_INTEGER:
-      {
-         if (pExpr->flags & EP_IntValue)
-         {
-            /* get pExpr->u.iValue */
-            return sqlite3_mprintf("%d", pExpr->u.iValue);
-         } else {
-            /* get pExpr->u.zToken */
-            return sqlite3_mprintf("%s", pExpr->u.zToken);
-         }
-         break;
+
+      char *ret = sqlite3_mprintf("( %s %s %s )", left, binary_op(pExpr->op),
+       right);
+
+      sqlite3DbFree(v->db, left);
+      sqlite3DbFree(v->db, right);
+
+      return ret;
+    }
+    case TK_LSHIFT:
+    case TK_RSHIFT: {
+      break;
+    }
+    case TK_PLUS :
+    case TK_MINUS :
+    case TK_STAR :
+    case TK_SLASH :
+    case TK_REM: {
+      char *left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
+      if( !left ){
+        return NULL;
       }
-      case TK_FLOAT : break; 
-      case TK_BLOB : 
-      {
-         return sqlite3_mprintf("%s", pExpr->u.zToken); 
+      char *right = sqlite3ExprDescribe_inner(v, pExpr->pRight, atRuntime);
+      if( !right ){
+        sqlite3DbFree(v->db, left);
+        return NULL;
       }
-      case TK_REGISTER:
-      {
-         if (atRuntime)
-         {
-            /* look into register pExpr->iTable */
-            Mem *m;
-            m = &v->aMem[pExpr->iTable];
+      char *ret = sqlite3_mprintf("( %s %s %s )", left, binary_op(pExpr->op),
+       right);
 
-            return print_mem(m);
-         }
-         else
-         {
-            /* probably an explain request */
-            return sqlite3_mprintf("R%d", pExpr->iTable);
-         }
+      sqlite3DbFree(v->db, left);
+      sqlite3DbFree(v->db, right);
+
+      return ret;
+    }
+    case TK_CONCAT:
+    case TK_COLLATE: {
+      break;
+    }
+    case TK_BITNOT: {
+      char *left = sqlite3ExprDescribe_inner(v, pExpr->pLeft, atRuntime);
+      if (!left)
+        return NULL;
+      char *ret = sqlite3_mprintf("( ~ %s )", left);
+
+      sqlite3DbFree(v->db, left);
+
+      return ret;
+    }
+    case TK_STRING: {
+      return sqlite3_mprintf("'%s'", pExpr->u.zToken);
+    }
+    case TK_JOIN_KW:
+    case TK_CONSTRAINT:
+    case TK_DEFAULT: {
+      break;
+    }
+    case TK_NULL : {
+      return sqlite3_mprintf("NULL");
+    }
+    case TK_PRIMARY:
+    case TK_UNIQUE:
+    case TK_CHECK:
+    case TK_REFERENCES:
+    case TK_AUTOINCR:
+    case TK_ON:
+    case TK_INSERT:
+    case TK_DELETE:
+    case TK_UPDATE:
+    case TK_SET:
+    case TK_DEFERRABLE:
+    case TK_FOREIGN:
+    case TK_DROP:
+    case TK_UNION:
+    case TK_ALL:
+    case TK_EXCEPT:
+    case TK_INTERSECT:
+    case TK_SELECT:
+    case TK_SELECTV:
+    case TK_DISTINCT:
+    case TK_DOT:
+    case TK_FROM:
+    case TK_JOIN:
+    case TK_USING:
+    case TK_ORDER: {
+      break;
+    }
+    case TK_GROUP: {
+#if 0
+      char *expr = sqlite3ExprDescribe(v, pExpr->x.pEList);
+
+      return sqlite3_mprintf(" GROUP BY %s", expr);
+#endif
+
+      break;
+    }
+    case TK_HAVING:
+    case TK_LIMIT:
+    case TK_WHERE:
+    case TK_INTO:
+    case TK_VALUES: {
+      break;
+    }
+    case TK_INTEGER: {
+      if ( pExpr->flags & EP_IntValue ){
+        /* get pExpr->u.iValue */
+        return sqlite3_mprintf("%d", pExpr->u.iValue);
+      }else{
+        /* get pExpr->u.zToken */
+        return sqlite3_mprintf("%s", pExpr->u.zToken);
       }
-      case TK_VARIABLE : 
-      {
-         int iBindVar = pExpr->iColumn;
+      break;
+    }
+    case TK_FLOAT: break;
+    case TK_BLOB: {
+      return sqlite3_mprintf("%s", pExpr->u.zToken);
+    }
+    case TK_REGISTER: {
+      if( atRuntime ){
+        /* look into register pExpr->iTable */
+        Mem *m;
+        m = &v->aMem[pExpr->iTable];
 
-         Mem *m = &v->aVar[iBindVar-1];
-
-         return print_mem(m);
+        return print_mem(m);
+      }else{
+        /* probably an explain request */
+        return sqlite3_mprintf("R%d", pExpr->iTable);
       }
-      case TK_CASE : break; 
-      case TK_WHEN : break; 
-      case TK_THEN : break; 
-      case TK_ELSE : break; 
-      case TK_INDEX : break; 
-      case TK_TO_TEXT : break; 
-      case TK_TO_DATETIME : break; 
-      case TK_TO_INTERVAL_YE : break; 
-      case TK_TO_INTERVAL_MO : break; 
-      case TK_TO_INTERVAL_DY : break; 
-      case TK_TO_INTERVAL_HO : break; 
-      case TK_TO_INTERVAL_MI : break; 
-      case TK_TO_INTERVAL_SE : break; 
-      case TK_TO_BLOB : break; 
-      case TK_TO_NUMERIC : break; 
-      case TK_TO_INT : break; 
-      case TK_TO_REAL : break; 
-      case TK_TO_DECIMAL : break; 
-      case TK_ISNOT : break; 
-      case TK_END_OF_FILE : break; 
-      case TK_ILLEGAL : break; 
-      case TK_SPACE : break; 
-      case TK_UNCLOSED_STRING : break; 
-      case TK_FUNCTION :
-      {
-         if (strncmp(pExpr->u.zToken, "like", 5) == 0)
-         {
-            assert(pExpr->x.pList->nExpr == 2);
-            char *left = sqlite3ExprDescribe_inner(v, pExpr->x.pList->a[1].pExpr, atRuntime);
-            if (!left)
-               return NULL;
-            char *rite = sqlite3ExprDescribe_inner(v, pExpr->x.pList->a[0].pExpr, atRuntime);
-            if (!rite)
-            {
-               sqlite3DbFree(v->db, left);
-               return NULL;
-            }
+    }
+    case TK_VARIABLE: {
+      int iBindVar = pExpr->iColumn;
+      Mem *m = &v->aVar[iBindVar-1];
 
-            char *ret = sqlite3_mprintf(" LIKE ( %s, %s) ", rite, left);
+      return print_mem(m);
+    }
+    case TK_CASE:
+    case TK_WHEN:
+    case TK_THEN:
+    case TK_ELSE:
+    case TK_INDEX:
+    case TK_TO_TEXT:
+    case TK_TO_DATETIME:
+    case TK_TO_INTERVAL_YE:
+    case TK_TO_INTERVAL_MO:
+    case TK_TO_INTERVAL_DY:
+    case TK_TO_INTERVAL_HO:
+    case TK_TO_INTERVAL_MI:
+    case TK_TO_INTERVAL_SE:
+    case TK_TO_BLOB:
+    case TK_TO_NUMERIC:
+    case TK_TO_INT:
+    case TK_TO_REAL:
+    case TK_TO_DECIMAL:
+    case TK_ISNOT:
+    case TK_END_OF_FILE:
+    case TK_ILLEGAL:
+    case TK_SPACE:
+    case TK_UNCLOSED_STRING: {
+      break;
+    }
+    case TK_FUNCTION: {
+      if( strncmp(pExpr->u.zToken, "like", 5) == 0 ){
+        assert(pExpr->x.pList->nExpr == 2);
+        char *left = sqlite3ExprDescribe_inner(v, pExpr->x.pList->a[1].pExpr,
+                           atRuntime);
+        if (!left)
+          return NULL;
+        char *rite = sqlite3ExprDescribe_inner(v, pExpr->x.pList->a[0].pExpr,
+                           atRuntime);
+        if( !rite ){
+          sqlite3DbFree(v->db, left);
+          return NULL;
+        }
 
-            sqlite3DbFree(v->db, left);
-            sqlite3DbFree(v->db, rite);
+        char *ret = sqlite3_mprintf(" LIKE ( %s, %s) ", rite, left);
 
-            return ret;
-         }
-         break;
+        sqlite3DbFree(v->db, left);
+        sqlite3DbFree(v->db, rite);
+
+        return ret;
       }
-      case TK_COLUMN : 
-      {
-         if (atRuntime)
-            return sqlite3_mprintf("\"%s\"",  pExpr->u.zToken);
-         else
-            return sqlite3_mprintf("%s",  pExpr->u.zToken);
-
+      break;
+    }
+    case TK_COLUMN: {
+      if( atRuntime ){
+        return sqlite3_mprintf("\"%s\"",  pExpr->u.zToken);
+      }else{
+        return sqlite3_mprintf("%s",  pExpr->u.zToken);
       }
-      case TK_AGG_FUNCTION : break; 
-      case TK_AGG_COLUMN : break; 
-      case TK_UMINUS : break; 
-      case TK_UPLUS : break; 
-   }
-   {
-      static int last;
+    }
+    case TK_AGG_FUNCTION:
+    case TK_AGG_COLUMN:
+    case TK_UMINUS:
+    case TK_UPLUS: {
+      break;
+    }
+  }
+  {
+    static int last;
 
-      if(last != pExpr->op)
-      {
-         const char *sql;
+    if( last != pExpr->op ){
+      const char *sql;
 
-         sql = comdb2_get_sql();
+      sql = comdb2_get_sql();
 
-         /* we only need one trace */
-         fprintf(stderr, "Unsupported expression for remote cursors, pls msg Dorin H of 592 for support!\n");
-         fprintf(stderr, "%s; pExpr->op=%d\n", __func__, pExpr->op);
-         fprintf(stderr, "query:'%s'\n", (sql)?sql:"unavailable");
+      /* we only need one trace */
+      fprintf(stderr, "Unsupported expression for remote cursors, pls "
+            "msg Dorin H of 592 for support!\n");
+      fprintf(stderr, "%s; pExpr->op=%d\n", __func__, pExpr->op);
+      fprintf(stderr, "query:'%s'\n", (sql)?sql:"unavailable");
 
-         last = pExpr->op;
-      }
-   }
-   return NULL;
+      last = pExpr->op;
+    }
+  }
+  return NULL;
 }
 
 /* COMDB2 MODIFICATION */
-char* sqlite3ExprDescribe(Vdbe *v, const Expr *pExpr)
-{
-   return sqlite3ExprDescribe_inner(v, pExpr, 0);
+char* sqlite3ExprDescribe(Vdbe *v, const Expr *pExpr){
+  return sqlite3ExprDescribe_inner(v, pExpr, 0);
 }
 
 /* COMDB2 MODIFICATION */
-char *sqlite3ExprDescribeAtRuntime(Vdbe *v, const Expr *pExpr)
-{
-   return sqlite3ExprDescribe_inner(v, pExpr, 1);
+char *sqlite3ExprDescribeAtRuntime(Vdbe *v, const Expr *pExpr){
+  return sqlite3ExprDescribe_inner(v, pExpr, 1);
 }
 /*
 ** Validate that no temporary register falls within the range of

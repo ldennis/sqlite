@@ -191,7 +191,7 @@ int sqlite3BtreeNewDb(Btree *p);
 #define BTREE_HINT_RANGE 2       /* Range constraints on queries */
 
 /*
-** Values that may be OR'd together to form the second argument to the 
+** Values that may be OR'd together to form the second argument to the
 ** BTREE_HINT_FLAGS hint for sqlite3BtreeCursorHint():
 **
 ** The BTREE_BULKLOAD flag is set on index cursors when the index is going

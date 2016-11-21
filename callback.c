@@ -457,12 +457,14 @@ void sqlite3SchemaClear(void *p){
   pSchema->pSeqTab = 0;
   if( pSchema->schemaFlags & DB_SchemaLoaded ){
 #if 0
-    COMDB2 MODIFICATION
-    we clear the schema when things change and we detect that
-    comdb2 uses different mechanisms to protect against that, and
-    sqlite3BtreeUpdateMeta is not supported (sqlite3BtreeGetMeta returns
-    a constant 0
-    Nuke this out
+    /*
+    ** COMDB2 MODIFICATION
+    ** we clear the schema when things change and we detect that
+    ** comdb2 uses different mechanisms to protect against that, and
+    ** sqlite3BtreeUpdateMeta is not supported (sqlite3BtreeGetMeta returns
+    ** a constant 0
+    ** Nuke this out
+    **/
     pSchema->iGeneration++;
 #endif
     pSchema->schemaFlags &= ~DB_SchemaLoaded;
@@ -483,15 +485,18 @@ void sqlite3SchemaClearByName(void *p, const char *tblname){
   int len = sqlite3Strlen30(tblname);
   int len2;
 
-  for(pElem=sqliteHashFirst(&pSchema->tblHash); pElem; pElem=sqliteHashNext(pElem)){
+  for(pElem=sqliteHashFirst(&pSchema->tblHash);
+   pElem;
+   pElem=sqliteHashNext(pElem)){
 
     Table *pTab = sqliteHashData(pElem);
     len2 = sqlite3Strlen30(pTab->zName);
 
     if(len==len2 && strncmp(pTab->zName, tblname, len) == 0){
 
-      /* first we unhash */
-      sqlite3HashInsert(&pSchema->tblHash, tblname, 0); /* there is no Delete in a perfect hash */   
+      /* first we unhash - there is no Delete in a perfect hash */
+      sqlite3HashInsert(&pSchema->tblHash, tblname, 0);
+
       /* second we blast it away */
       sqlite3DeleteTable(0, pTab);
       break;

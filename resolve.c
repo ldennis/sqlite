@@ -512,7 +512,7 @@ lookupname_end:
       pTopNC = pTopNC->pNext;
     }
     return WRC_Prune;
-  } else {
+  }else{
     return WRC_Abort;
   }
 }

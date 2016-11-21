@@ -2260,8 +2260,8 @@ static int SQLITE_TCLAPI DbObjCmd(
        strcmp(zConflict, "abort"   ) != 0 &&
        strcmp(zConflict, "fail"    ) != 0 &&
        strcmp(zConflict, "ignore"  ) != 0 &&
-       strcmp(zConflict, "replace" ) != 0 ) {
-      Tcl_AppendResult(interp, "Error: \"", zConflict,
+       strcmp(zConflict, "replace" ) != 0 ){
+      Tcl_AppendResult(interp, "Error: \"", zConflict, 
             "\", conflict-algorithm must be one of: rollback, "
             "abort, fail, ignore, or replace", (char*)0);
       return TCL_ERROR;
@@ -2281,11 +2281,11 @@ static int SQLITE_TCLAPI DbObjCmd(
       nCol = sqlite3_column_count(pStmt);
     }
     sqlite3_finalize(pStmt);
-    if( nCol==0 ) {
+    if( nCol==0 ){
       return TCL_ERROR;
     }
     zSql = malloc( nByte + 50 + nCol*2 );
-    if( zSql==0 ) {
+    if( zSql==0 ){
       Tcl_AppendResult(interp, "Error: can't malloc()", (char*)0);
       return TCL_ERROR;
     }
@@ -2312,7 +2312,7 @@ static int SQLITE_TCLAPI DbObjCmd(
       return TCL_ERROR;
     }
     azCol = malloc( sizeof(azCol[0])*(nCol+1) );
-    if( azCol==0 ) {
+    if( azCol==0 ){
       Tcl_AppendResult(interp, "Error: can't malloc()", (char*)0);
       fclose(in);
       return TCL_ERROR;
@@ -3700,11 +3700,11 @@ void MD5Update(MD5Context *ctx, const unsigned char *buf, unsigned int len){
 
         /* Handle any leading odd-sized chunks */
 
-        if ( t ) {
+        if( t ){
                 unsigned char *p = (unsigned char *)ctx->in + t;
 
                 t = 64-t;
-                if (len < t) {
+                if( len < t ){
                         memcpy(p, buf, len);
                         return;
                 }
@@ -3717,7 +3717,7 @@ void MD5Update(MD5Context *ctx, const unsigned char *buf, unsigned int len){
 
         /* Process data in 64-byte chunks */
 
-        while (len >= 64) {
+        while( len >= 64 ){
                 memcpy(ctx->in, buf, 64);
                 byteReverse(ctx->in, 16);
                 MD5Transform(ctx->buf, (uint32 *)ctx->in);
@@ -3750,7 +3750,7 @@ static void MD5Final(unsigned char digest[16], MD5Context *ctx){
         count = 64 - 1 - count;
 
         /* Pad out to 56 mod 64 */
-        if (count < 8) {
+        if( count < 8 ){
                 /* Two lots of padding:  Pad the first block to 64 bytes */
                 memset(p, 0, count);
                 byteReverse(ctx->in, 16);
@@ -3758,7 +3758,7 @@ static void MD5Final(unsigned char digest[16], MD5Context *ctx){
 
                 /* Now fill the next block with 56 bytes */
                 memset(ctx->in, 0, 56);
-        } else {
+        }else{
                 /* Pad block to 56 bytes */
                 memset(p, 0, count-8);
         }

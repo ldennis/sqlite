@@ -47,7 +47,8 @@
 //
 %include {
 #include "sqliteInt.h"
-#include "comdb2Int.h"  // COMDB2 CUSTOM FUNCTION (ALL CUSTOM HEADERS ARE INCLUDED FROM HERE)
+#include "comdb2Int.h"  /* COMDB2 CUSTOM FUNCTION (ALL CUSTOM HEADERS
+                           ARE INCLUDED FROM HERE) */
 /*
 ** Disable all error recovery processing in the parser push-down
 ** automaton.
@@ -143,7 +144,8 @@ cmd ::= ROLLBACK trans_opt TO savepoint_opt nm(X). {
   sqlite3Savepoint(pParse, SAVEPOINT_ROLLBACK, &X);
 }
 
-///////////////////// COMDB2 GET statements //////////////////////////////////
+///////////////////// COMDB2 SET/GET statements ////////////////////////////////
+//
 
 cmd ::= GET getcmd.
 
@@ -222,7 +224,8 @@ putcmd ::= AUTHENTICATION OFF. {
 
 cmd ::= rebuild.
 
-rebuild ::= REBUILD nm(T) dbnm(X). { // REBUILD FULL CANNOT BE USED BECAUSE OF SQLITE SYNTAX
+rebuild ::= REBUILD nm(T) dbnm(X). { /* REBUILD FULL CANNOT BE USED
+                                        BECAUSE OF SQLITE SYNTAX */
     comdb2rebuildFull(pParse,&T,&X);
 }
 
@@ -242,8 +245,13 @@ rebuild ::= REBUILD DATABLOB nm(N) dbnm(X). {
 %type sql_permission {int}
 sql_permission(A) ::= READ. { A = AUTH_READ; }
 sql_permission(A) ::= WRITE.{ A = AUTH_WRITE;}
+sql_permission(A) ::= DDL.  { A = AUTH_OP;}
+
 %type op_permission{int}
 op_permission(A) ::= OP.   { A = AUTH_OP;   }
+
+%type userschema{int}
+userschema(A) ::= USERSCHEMA. {A = AUTH_USERSCHEMA;}
 
 cmd ::= GRANT sql_permission(P) ON nm(T) dbnm(Y) TO nm(U). {
     comdb2grant(pParse, 0, P, &T,&Y,&U);
@@ -253,12 +261,20 @@ cmd ::= GRANT op_permission(P) TO nm(U). {
     comdb2grant(pParse, 0, P, NULL,NULL,&U);
 }
 
+cmd ::= GRANT userschema(P) nm(U1) TO nm(U2). {
+    comdb2grant(pParse, 0, P, &U1,NULL,&U2);
+}
+
 cmd ::= REVOKE sql_permission(P) ON nm(T) dbnm(Y) TO nm(U). {
     comdb2grant(pParse, 1, P, &T,&Y,&U);
 }
 
 cmd ::= REVOKE op_permission(P) TO nm(U). {
     comdb2grant(pParse, 1, P, NULL,NULL,&U);
+}
+
+cmd ::= REVOKE userschema(P) nm(U1) TO nm(U2). {
+    comdb2grant(pParse, 1, P, &U1,NULL,&U2);
 }
 
 //////////////////// COMDB2 TRUNCATE TABLE statement /////////////////////////
@@ -288,7 +304,7 @@ cmd ::= ANALYZE nm(N) dbnm(Y) analyzepercentage(P) analyzeopt(X). {
     comdb2analyze(pParse, X, &N, &Y, P);
 }
 
-cmd ::= ANALYZE ALL analyzepercentage(P) analyzeopt(X). {
+cmd ::= ANALYZE analyzepercentage(P) analyzeopt(X). {
     comdb2analyze(pParse, X, NULL, NULL, P);
 }
 
@@ -471,52 +487,11 @@ columnname(A) ::= nm(A) typetoken(Y). {sqlite3AddColumn(pParse,&A,&Y);}
 %endif SQLITE_OMIT_COMPOUND_SELECT
   REINDEX RENAME CTIME_KW IF
 // COMDB2 KEYWORDS  
-  AGGREGATE
-  ALIAS
-  AUTHENTICATION
-  BLOBFIELD
-  BULKIMPORT
-  CONSUMER
-  COVERAGE
-  CRLE
-  DATA
-  DATABLOB
-  FOR
-  FUNCTION
-  GET
-  GRANT
-  IPU
-  ISC
-  KW
-  LUA
-  LZ4
-  ODH
-  OFF
-  OP
-  OPTIONS
-  PARTITION
-  PASSWORD
-  PERIOD
-  PROCEDURE
-  PUT
-  REBUILD
-  READ
-  REC
-  RESERVED
-  RETENTION
-  REVOKE
-  RLE
-  SCALAR
-  START
-  SUMMARIZE
-  THREADS
-  THRESHOLD
-  TIME
-  TRUNCATE
-  VERSION
-  WRITE
-  ZLIB
-  .
+  AGGREGATE ALIAS AUTHENTICATION BLOBFIELD BULKIMPORT CONSUMER COVERAGE CRLE
+  DATA DATABLOB FOR FUNCTION GET GRANT IPU ISC KW LUA LZ4 ODH OFF OP OPTIONS
+  PARTITION PASSWORD PERIOD PROCEDURE PUT REBUILD READ REC RESERVED RETENTION
+  REVOKE RLE SCALAR START SUMMARIZE THREADS THRESHOLD TIME TRUNCATE VERSION
+  WRITE DDL USERSCHEMA ZLIB .
 %wildcard ANY.
 
 

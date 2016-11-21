@@ -27,14 +27,14 @@ void comdb2SetWriteFlag(int);
 ** that the database is corrupt.
 */
 static void corruptSchema(
-InitData *pData,     /* Initialization context */
-const char *zObj,    /* Object being parsed at the point of error */
-const char *zExtra   /* Error information */
+  InitData *pData,     /* Initialization context */
+  const char *zObj,    /* Object being parsed at the point of error */
+  const char *zExtra   /* Error information */
 ){
-sqlite3 *db = pData->db;
-if( !db->mallocFailed && (db->flags & SQLITE_RecoveryMode)==0 ){
-char *z;
-if( zObj==0 ) zObj = "?";
+  sqlite3 *db = pData->db;
+  if( !db->mallocFailed && (db->flags & SQLITE_RecoveryMode)==0 ){
+    char *z;
+    if( zObj==0 ) zObj = "?";
     z = sqlite3MPrintf(db, "malformed database schema (%s)", zObj);
     if( zExtra ) z = sqlite3MPrintf(db, "%z - %s", z, zExtra);
     sqlite3DbFree(db, *pData->pzErrMsg);
@@ -191,14 +191,12 @@ static int sqlite3InitOne(sqlite3 *db, int iDb, char **pzErrMsg){
       goto error_out;
     }
     pTab = sqlite3FindTableCheckOnly(db, zMasterName, db->aDb[iDb].zName);
+  }else {
+    initData.db = db;
+    initData.iDb = iDb;
+    initData.rc = SQLITE_OK;
+    initData.pzErrMsg = pzErrMsg;
   }
-  else
-    {
-      initData.db = db;
-      initData.iDb = iDb;
-      initData.rc = SQLITE_OK;
-      initData.pzErrMsg = pzErrMsg;
-    }
 
   /* Create a cursor to hold the database open
   **/
@@ -266,7 +264,7 @@ static int sqlite3InitOne(sqlite3 *db, int iDb, char **pzErrMsg){
       /* If opening an attached database, the encoding much match ENC(db) */
       if( meta[BTREE_TEXT_ENCODING-1]!=ENC(db) ){
         sqlite3SetString(pzErrMsg, db, "attached databases must use the same"
-			 " text encoding as main database");
+                                       " text encoding as main database");
         rc = SQLITE_ERROR;
         goto initone_error_out;
       }
@@ -411,7 +409,8 @@ int sqlite3InitTable(sqlite3 *db, char **pzErrMsg, const char *zName)
   for(i=0; rc==SQLITE_OK && i<db->nDb; i++){
     if(i==1 || DbHasProperty(db, i, DB_SchemaLoaded) && (i==0 || (!zName && i>1))) continue;
     /* remote tables are updated on a table basis; check if the schema for
-       this table is actually present */
+    ** this table is actually present
+    */
     if (dbname[0] && (sqlite3FindTableCheckOnly(db, db->init.zTblName, db->aDb[i].zName) != 0)) continue;
 
     rc = sqlite3InitOne(db, i, pzErrMsg);
@@ -658,7 +657,7 @@ static int sqlite3Prepare(
   ** but it does *not* override schema lock detection, so this all still
   ** works even if READ_UNCOMMITTED is set.
   */
-  for(i=0; i<db->nDb; i++) {
+  for(i=0; i<db->nDb; i++){
     Btree *pBt = db->aDb[i].pBt;
     if( pBt ){
       assert( sqlite3BtreeHoldsMutex(pBt) );

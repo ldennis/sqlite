@@ -290,4 +290,3 @@ void comdb2DropAggFunc(Parse *parse, Token *proc)
 	comdb2DropFunc(parse, proc, a, aggregate);
 }
 
-/* vim: set ts=8 sw=8 noet: */

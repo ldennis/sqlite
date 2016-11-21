@@ -319,6 +319,8 @@ static Keyword aKeywordTable[] = {
   { "VERSION",          "TK_VERSION",       ALWAYS,                 0},
   { "TRUNCATE",         "TK_TRUNCATE",      ALWAYS,                 0},
   { "WRITE",            "TK_WRITE",         ALWAYS,                 0},
+  { "DDL",              "TK_DDL",           ALWAYS,                 0},
+  { "USERSCHEMA",       "TK_USERSCHEMA",    ALWAYS,                 0},
   { "ZLIB",             "TK_ZLIB",          ALWAYS,                 0},
 };
 

@@ -257,7 +257,7 @@ static GETPROCTIMES getProcessTimesAddr = NULL;
 static int hasTimer(void){
   if( getProcessTimesAddr ){
     return 1;
-  } else {
+  }else{
     /* GetProcessTimes() isn't supported in WIN95 and some other Windows
     ** versions. See if the version we are running on has it, and if it
     ** does, save off a pointer to it and the current process handle.
@@ -4087,7 +4087,7 @@ static int do_meta_command(char *zLine, ShellState *p){
         }
         p->out = stdout;
         rc = 1;
-      } else {
+      }else{
         sqlite3_snprintf(sizeof(p->outfile), p->outfile, "%s", zFile);
       }
     }

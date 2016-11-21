@@ -78,32 +78,31 @@ int comdb2_dynamic_attach(sqlite3 *db, sqlite3_context *context, sqlite3_value *
     goto attach_error;
   }
 
-  /* we store one Btree per foreign db, therefore we need to extract the dbname from table */
+  /* we store one Btree per foreign db, therefore we need to extract
+  ** the dbname from table */
   dbName = sqlite3DbStrDup(db, zName);
   if( rc==SQLITE_OK && dbName==0 ){
     rc = SQLITE_NOMEM;
     goto attach_error;
-  }
-  else
-  {
-     /* to keep table names unique, zName includes the dbname as well.
-        But the Btree will be named after dbname, since they will collect all
-        the tables for this db */
-     char *ptr = strchr(dbName, '.');
-     if (ptr)
-     {
-        *ptr = '\0';
-        tblName = (ptr+1);
-     }
-     else
-     {
-        fprintf(stderr, "%s: remote dbname URI incomplete \"%s\"?\n", __func__, dbName);
-        zErrDyn = sqlite3MPrintf(db, "%s: remote dbname URI incomplete \"%s\"?\n", __func__, dbName);
-        sqlite3DbFree(db, dbName);
+  }else{
+    /* to keep table names unique, zName includes the dbname as well.
+    ** But the Btree will be named after dbname, since they will collect all
+    ** the tables for this db */
+    char *ptr = strchr(dbName, '.');
+    if( ptr ){
+      *ptr = '\0';
+      tblName = (ptr+1);
+    }else{
+      fprintf(stderr, "%s: remote dbname URI incomplete \"%s\"?\n",
+           __func__, dbName);
+       zErrDyn = sqlite3MPrintf(db,
+                       "%s: remote dbname URI incomplete \"%s\"?\n",
+           __func__, dbName);
+       sqlite3DbFree(db, dbName);
 
-        rc = SQLITE_ERROR;
-        goto attach_error;
-     }
+       rc = SQLITE_ERROR;
+       goto attach_error;
+    }
   }
 
   for(i=0; i<db->nDb; i++){
@@ -113,14 +112,13 @@ int comdb2_dynamic_attach(sqlite3 *db, sqlite3_context *context, sqlite3_value *
     /*
       zErrDyn = sqlite3MPrintf(db, "database %s is already in use", zName);
       goto attach_error;
-      */
+    */
       break;
     }
   }
 
   iFndDb = i;
-  if(i==db->nDb)
-  {
+  if( i==db->nDb ){
      /* Allocate the new entry in the db->aDb[] array and initialize the schema
       ** hash tables.
       */
@@ -182,64 +180,63 @@ int comdb2_dynamic_attach(sqlite3 *db, sqlite3_context *context, sqlite3_value *
 
 
 #ifdef SQLITE_HAS_CODEC
-     if( rc==SQLITE_OK ){
-        extern int sqlite3CodecAttach(sqlite3*, int, const void*, int);
-        extern void sqlite3CodecGetKey(sqlite3*, int, void**, int*);
-        int nKey;
-        char *zKey;
-        int t = sqlite3_value_type(argv[2]);
-        switch( t ){
-           case SQLITE_INTEGER:
-           case SQLITE_FLOAT:
-              zErrDyn = sqlite3DbStrDup(db, "Invalid key value");
-              rc = SQLITE_ERROR;
-              break;
+    if( rc==SQLITE_OK ){
+      extern int sqlite3CodecAttach(sqlite3*, int, const void*, int);
+      extern void sqlite3CodecGetKey(sqlite3*, int, void**, int*);
+      int nKey;
+      char *zKey;
+      int t = sqlite3_value_type(argv[2]);
+      switch( t ){
+        case SQLITE_INTEGER:
+        case SQLITE_FLOAT:
+          zErrDyn = sqlite3DbStrDup(db, "Invalid key value");
+          rc = SQLITE_ERROR;
+          break;
 
-           case SQLITE_TEXT:
-           case SQLITE_BLOB:
-              nKey = sqlite3_value_bytes(argv[2]);
-              zKey = (char *)sqlite3_value_blob(argv[2]);
-              rc = sqlite3CodecAttach(db, db->nDb-1, zKey, nKey);
-              break;
+        case SQLITE_TEXT:
+        case SQLITE_BLOB:
+          nKey = sqlite3_value_bytes(argv[2]);
+          zKey = (char *)sqlite3_value_blob(argv[2]);
+          rc = sqlite3CodecAttach(db, db->nDb-1, zKey, nKey);
+          break;
 
-           case SQLITE_NULL:
-              /* No key specified.  Use the key from the main database */
-              sqlite3CodecGetKey(db, 0, (void**)&zKey, &nKey);
-              if( nKey || sqlite3BtreeGetOptimalReserve(db->aDb[0].pBt)>0 ){
-                 rc = sqlite3CodecAttach(db, db->nDb-1, zKey, nKey);
-              }
-              break;
-        }
-     }
+        case SQLITE_NULL:
+          /* No key specified.  Use the key from the main database */
+          sqlite3CodecGetKey(db, 0, (void**)&zKey, &nKey);
+          if( nKey || sqlite3BtreeGetOptimalReserve(db->aDb[0].pBt)>0 ){
+            rc = sqlite3CodecAttach(db, db->nDb-1, zKey, nKey);
+          }
+          break;
+      }
+    }
 #endif
   }
 
-  /* If the file was opened successfully, read the schema for the new database.
-   ** If this fails, or if opening the file failed, then close the file and 
-   ** remove the entry from the db->aDb[] array. i.e. put everything back the way
-   ** we found it.
-   */
+  /* If the file was opened successfully, read the schema for the new
+  ** database.  If this fails, or if opening the file failed, then
+  ** close the file and remove the entry from the db->aDb[]
+  ** array. i.e. put everything back the way we found it.
+  */
   if( rc==SQLITE_OK ){
-     Table *p;
+    Table *p;
 
-     sqlite3BtreeEnterAll(db);
-     rc = sqlite3InitTable(db, &zErrDyn, zName);
+    sqlite3BtreeEnterAll(db);
+    rc = sqlite3InitTable(db, &zErrDyn, zName);
 
-     /* COMDB2 MODIFICATION */
-     /* Need to set the version to the table to support per table schema refresh */
-     p = sqlite3HashFind(&db->aDb[iFndDb].pSchema->tblHash, tblName);
-     if(!p)
-     {
-       fprintf(stderr, "%s: failed to find table \"%s\" after init\n", __func__, tblName);
-       rc = SQLITE_ERROR;
-     }
-     else
-     {
-       p->version = version;
-       p->iDb = iFndDb;
-     }
+    /* COMDB2 MODIFICATION
+    ** Need to set the version to the table to support per table schema refresh
+    */
+    p = sqlite3HashFind(&db->aDb[iFndDb].pSchema->tblHash, tblName);
+    if( !p ){
+      fprintf(stderr, "%s: failed to find table \"%s\" after init\n",
+            __func__, tblName);
+      rc = SQLITE_ERROR;
+    }else{
+      p->version = version;
+      p->iDb = iFndDb;
+    }
 
-     sqlite3BtreeLeaveAll(db);
+    sqlite3BtreeLeaveAll(db);
   }
 #ifdef SQLITE_USER_AUTHENTICATION
   if( rc==SQLITE_OK ){
@@ -251,23 +248,23 @@ int comdb2_dynamic_attach(sqlite3 *db, sqlite3_context *context, sqlite3_value *
   }
 #endif
   if( rc ){
-     int iDb = db->nDb - 1;
-     assert( iDb>=2 );
-     if( db->aDb[iDb].pBt ){
-        sqlite3BtreeClose(db->aDb[iDb].pBt);
-        db->aDb[iDb].pBt = 0;
-        db->aDb[iDb].pSchema = 0;
-     }
-     sqlite3ResetAllSchemasOfConnection(db);
-     db->nDb = iDb;
-     if( rc==SQLITE_NOMEM || rc==SQLITE_IOERR_NOMEM ){
-        sqlite3OomFault(db);
-        sqlite3DbFree(db, zErrDyn);
-        zErrDyn = sqlite3MPrintf(db, "out of memory");
-     }else if( zErrDyn==0 ){
-        zErrDyn = sqlite3MPrintf(db, "unable to open database: %s", zFile);
-     }
-     goto attach_error;
+    int iDb = db->nDb - 1;
+    assert( iDb>=2 );
+    if( db->aDb[iDb].pBt ){
+      sqlite3BtreeClose(db->aDb[iDb].pBt);
+      db->aDb[iDb].pBt = 0;
+      db->aDb[iDb].pSchema = 0;
+    }
+    sqlite3ResetAllSchemasOfConnection(db);
+    db->nDb = iDb;
+    if( rc==SQLITE_NOMEM || rc==SQLITE_IOERR_NOMEM ){
+      sqlite3OomFault(db);
+      sqlite3DbFree(db, zErrDyn);
+      zErrDyn = sqlite3MPrintf(db, "out of memory");
+    }else if( zErrDyn==0 ){
+      zErrDyn = sqlite3MPrintf(db, "unable to open database: %s", zFile);
+    }
+    goto attach_error;
   }
 
   return 0;

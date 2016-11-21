@@ -140,6 +140,7 @@
 #include <sys/types.h>
 #include <inttypes.h>
 #include <cheapstack.h>
+#include <sys/time.h>
 
 /* 
 ** If SQLITE_DEBUG_SORTER_THREADS is defined, this module outputs various
@@ -1562,6 +1563,8 @@ static void vdbePmaWriteVarint(PmaWriter *p, u64 iVal){
   vdbePmaWriteBlob(p, aByte, nByte);
 }
 
+
+
 /*
 ** Write the current contents of in-memory linked-list pList to a level-0
 ** PMA in the temp file belonging to sub-task pTask. Return SQLITE_OK if 
@@ -1598,6 +1601,15 @@ static int vdbeSorterListToPMA(SortSubtask *pTask, SorterList *pList){
     assert( pTask->file.iEof==0 );
     assert( pTask->nPMA==0 );
   }
+
+
+  /*COMDB2 Modification */
+  int comdb2_tmpdir_space_low();
+  i64 nByte = pTask->file.iEof+pList->szPMA+9;
+  i64 lmt = (1<<27);
+  /* if nByte > 124MB and we are running low on free space*/
+  if(nByte > lmt && comdb2_tmpdir_space_low())
+     rc = SQLITE_TOOBIG;
 
   /* Try to get the file to memory map */
   if( rc==SQLITE_OK ){

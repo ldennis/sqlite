@@ -83,13 +83,13 @@ static int _convMem2ClientDatetime(Mem *pMem, void *out, int outlen,
         int *outdtsz, int isstring)
 {
     int ret;
-    if (!(pMem->flags & MEM_Datetime))   /* ugly, arghh */
+    if( !(pMem->flags & MEM_Datetime))   /* ugly, arghh */
         return SQLITE_ERROR;
-    if (!pMem->tz)
+    if( !pMem->tz)
         return SQLITE_ERROR;
-    if (isstring) {
+    if( isstring) {
         ret = dttz_to_str(&pMem->du.dt, out, outlen, outdtsz, pMem->tz);
-    } else {
+    }else{
         if (outlen != sizeof(cdb2_client_datetime_t))
             return SQLITE_ERROR;
         *outdtsz = sizeof(cdb2_client_datetime_t);
@@ -278,43 +278,42 @@ static void secondFunc(sqlite3_context *context, int argc, sqlite3_value **argv)
 
 
 
-static void daysFunc(sqlite3_context *context, int argc, sqlite3_value **argv) {
-
+static void daysFunc(sqlite3_context *context, int argc, sqlite3_value **argv){
   assert(argc == 2);
 
   if( SQLITE_NULL!=sqlite3_value_type(argv[0]) ){
 
-      const unsigned char *z = sqlite3_value_text(argv[1]);
+    const unsigned char *z = sqlite3_value_text(argv[1]);
 
-      if(z && sqlite3VdbeMemDatetimefy(argv[0]) == SQLITE_OK) {
-            cdb2_client_datetime_t   cdt;
+    if( z && sqlite3VdbeMemDatetimefy(argv[0]) == SQLITE_OK ){
+      cdb2_client_datetime_t   cdt;
 
-            if(convMem2ClientDatetime(argv[0], &cdt) != SQLITE_OK) {
-                sqlite3_result_null(context);
-                return;
-            }
-/*
-            if(!strncmp(z, "week", 4)) {
-                sqlite3_result_int(context, cdt.tm.tm_wday);
-            } else if(!strncmp(z, "month", 5)) {
-                sqlite3_result_int(context, cdt.tm.tm_mday);
-            } else if(!strncmp(z, "year", 4)) {
-*/
-            if(z[0] == 'w') {
-                sqlite3_result_int(context, cdt.tm.tm_wday);
-            } else if(z[0] == 'm') {
-                /* days since start of month, not day of month */
-                sqlite3_result_int(context, cdt.tm.tm_mday-1); 
-            } else if(z[0] == 'y') {
-                sqlite3_result_int(context, cdt.tm.tm_yday);
-            } else {
-                /* default to dayFunc*/
-                sqlite3_result_int(context, cdt.tm.tm_mday-1);
-            }
+      if( convMem2ClientDatetime(argv[0], &cdt) != SQLITE_OK ){
+	sqlite3_result_null(context);
+	return;
       }
-
-  } else 
+      /*
+      if( !strncmp(z, "week", 4) ){
+        sqlite3_result_int(context, cdt.tm.tm_wday);
+      }else if( !strncmp(z, "month", 5) ){
+	sqlite3_result_int(context, cdt.tm.tm_mday);
+      }else if( !strncmp(z, "year", 4) ){
+      */
+      if( z[0] == 'w' ){
+	sqlite3_result_int(context, cdt.tm.tm_wday);
+      }else if( z[0] == 'm' ){
+	/* days since start of month, not day of month */
+	sqlite3_result_int(context, cdt.tm.tm_mday-1);
+      }else if( z[0] == 'y' ){
+	sqlite3_result_int(context, cdt.tm.tm_yday);
+      }else{
+	/* default to dayFunc*/
+	sqlite3_result_int(context, cdt.tm.tm_mday-1);
+      }
+    }
+  }else{
       sqlite3_result_null(context);
+  }
 }
 
 static void nowFunc(sqlite3_context *context, int argc, sqlite3_value **argv)
@@ -384,4 +383,3 @@ static void monthsFunc(sqlite3_context *context, int argc, sqlite3_value **argv)
       sqlite3_result_null(context);
 }
 
-/* vim: set et sw=4 ts=4: */

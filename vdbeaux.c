@@ -5311,7 +5311,6 @@ Mem* sqlite3GetCachedResultRow(sqlite3_stmt *pStmt, int *nColumns)
 
   return NULL;
 }
-/* vim: set ts=2 sw=2 et: */
 #ifdef SQLITE_ENABLE_PREUPDATE_HOOK
 
 /*
